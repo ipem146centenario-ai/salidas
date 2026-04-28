@@ -1,0 +1,147 @@
+:root {
+  --bg: #0f172a;
+  --panel: #1e293b;
+  --accent: #38bdf8;
+  --success: #10b981;
+  --danger: #ef4444;
+  --text: #f1f5f9;
+}
+body {
+  font-family: "Plus Jakarta Sans", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 10px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.panel {
+  background: var(--panel);
+  width: 100%;
+  max-width: 800px;
+  padding: 15px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 20px;
+}
+.controles,
+.filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+#grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+  width: 100%;
+  max-width: 1000px;
+}
+
+.alumno {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 20px 10px;
+  border-radius: 12px;
+  text-align: center;
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: 0.3s;
+  cursor: pointer;
+}
+
+/* ESTADO AUSENTE */
+.alumno.ausente {
+  filter: grayscale(1);
+  opacity: 0.5;
+  border: 1px dashed #ef4444;
+  background: #000;
+}
+
+.ausente-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  z-index: 10;
+  accent-color: var(--danger);
+}
+
+.label-ausente {
+  color: var(--danger);
+  font-size: 0.7rem;
+  font-weight: 800;
+  margin-top: 10px;
+}
+.nombre {
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: block;
+}
+.estado-aula {
+  color: var(--success);
+  font-size: 0.6rem;
+  margin-top: 10px;
+}
+.motivo-destacado {
+  background: var(--danger);
+  color: white;
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  margin-top: 10px;
+  font-weight: bold;
+}
+
+.out {
+  border: 2px solid var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+#status-container {
+  position: fixed;
+  bottom: 10px;
+  background: var(--panel);
+  padding: 10px 20px;
+  border-radius: 30px;
+  border: 1px solid var(--accent);
+}
+
+.alumno.ausente .label-ausente {
+    color: #ff4d4d;
+    font-weight: 800;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    margin-top: 8px;
+    letter-spacing: 1px;
+}
+
+.alumno.ausente {
+    background: rgba(0, 0, 0, 0.4) !important;
+    border-color: var(--danger) !important;
+    box-shadow: inset 0 0 10px rgba(255, 0, 0, 0.1);
+}
+
+/* Cuando el alumno está ausente, forzamos que no se vea nada más que el texto de error */
+.alumno.ausente .estado-aula, 
+.alumno.ausente .motivo-destacado {
+    display: none !important;
+}
+
+.alumno.ausente .label-ausente {
+    display: block !important;
+    color: #ff4444;
+    font-weight: 900;
+    margin-top: 10px;
+}
+
+.alumno.ausente {
+    background: #000 !important;
+    border: 2px solid #ff4444 !important;
+    opacity: 0.7;
+}
