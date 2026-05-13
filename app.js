@@ -1,4 +1,4 @@
-const URL = "https://script.google.com/macros/s/AKfycbyflxL8Bpa4CqyvpU29ad5SAdPCrwrYFMiiJLqmsKaJYWWazOiVTAQNxL2h9raQ9DFueg/exec";
+const URL = "https://script.google.com/macros/s/AKfycbxbAEu9d9joaeUItVH_T0mI_iK7AL2QK8xEGgVGfvu5zdAT6S4EbesydZSk0MXNmfb05g/exec";
 
 let alumnos = [];
 let docentes = [];
