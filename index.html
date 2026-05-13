@@ -1,59 +1,219 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>INSPECTOR ULTRA PRO</title>
+
+    <title>Gestión de Salidas | IPEM 146</title>
+
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
+
 <body>
+
     <header>
-        <h1>📊 GESTION SALIDAS <span>IPEM 146 "CENTENARIO"</span></h1>
+        <h1>
+            📊 GESTIÓN SALIDAS
+            <span>IPEM 146 "CENTENARIO"</span>
+        </h1>
     </header>
 
-    <div class="panel">
-        <div class="grupo-sesion">
-            <h3>🔑 ACCESO AL SISTEMA</h3>
-            <div class="controles">
-                <select id="docentes"></select>
-                <input type="password" id="passDocente" placeholder="PIN">
-                <button onclick="verificarAcceso()" id="btn-login" class="btn-main">ENTRAR</button>
-                <button id="btn-logout" onclick="cerrarSesion()" class="btn-exit" style="display:none;">🚪 SALIR</button>
+    <main class="container">
+
+        <div class="panel">
+
+            <!-- LOGIN -->
+            <div class="grupo-sesion">
+
+                <h3>🔑 ACCESO AL SISTEMA</h3>
+
+                <div class="controles">
+
+                    <select id="docentes">
+                        <option value="">Usuario...</option>
+                    </select>
+
+                    <!-- PASSWORD -->
+                    <div class="password-box">
+
+                        <input
+                            type="password"
+                            id="passDocente"
+                            placeholder="PIN"
+                            autocomplete="off"
+                        >
+
+                        <button
+                            type="button"
+                            class="toggle-pass"
+                            onclick="togglePassword()"
+                        >
+                            👁
+                        </button>
+
+                    </div>
+
+                    <button
+                        onclick="verificarAcceso()"
+                        id="btn-login"
+                        class="btn-main"
+                    >
+                        ENTRAR
+                    </button>
+
+                    <button
+                        id="btn-logout"
+                        onclick="cerrarSesion()"
+                        class="btn-exit"
+                        style="display:none;"
+                    >
+                        🚪 SALIR
+                    </button>
+
+                    <!-- CAMBIAR PASSWORD -->
+                    <button
+                        onclick="mostrarCambioPassword()"
+                        class="btn-change"
+                    >
+                        🔒 CAMBIAR CONTRASEÑA
+                    </button>
+
+                </div>
+
             </div>
+
+            <!-- PANEL PASSWORD -->
+            <div
+                id="panel-password"
+                class="panel-password"
+                style="display:none;"
+            >
+
+                <h3>🔑 CAMBIAR CONTRASEÑA</h3>
+
+                <input
+                    type="password"
+                    id="actualPass"
+                    placeholder="Contraseña actual"
+                >
+
+                <input
+                    type="password"
+                    id="nuevaPass"
+                    placeholder="Nueva contraseña"
+                >
+
+                <input
+                    type="password"
+                    id="repetirPass"
+                    placeholder="Repetir nueva contraseña"
+                >
+
+                <button
+                    onclick="cambiarPassword()"
+                    class="btn-main"
+                >
+                    GUARDAR CONTRASEÑA
+                </button>
+
+            </div>
+
+            <hr id="separador">
+
+            <!-- FILTROS -->
+            <div
+                id="seccion-filtros"
+                class="grupo-filtros"
+                style="display:none;"
+            >
+
+                <h3>🔍 FILTROS Y DESTINO</h3>
+
+                <div class="filtros">
+
+                    <select id="fCurso"></select>
+
+                    <select id="fDivision"></select>
+
+                    <select id="fTurno"></select>
+
+                    <select id="fEspecialidad"></select>
+
+                </div>
+
+                <div class="motivo-box">
+
+                    <select id="causa">
+
+                        <option value="">
+                            ⚠️ SELECCIONAR DESTINO...
+                        </option>
+
+                        <option value="Baño">
+                            🚻 Baño
+                        </option>
+
+                        <option value="Enfermería">
+                            🏥 Enfermería
+                        </option>
+
+                        <option value="Dirección">
+                            🏫 Dirección
+                        </option>
+
+                        <option value="Preceptoría">
+                            📁 Preceptoría
+                        </option>
+
+                        <option value="Biblioteca">
+                            📚 Biblioteca
+                        </option>
+
+                        <option value="Otro">
+                            📌 Otro
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
         </div>
 
-        <hr id="separador" style="display:none; border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 15px 0;">
+        <!-- STATUS -->
+        <div
+            id="status-container"
+            style="display:none;"
+        >
 
-        <div id="seccion-filtros" class="grupo-filtros" style="display:none;">
-            <h3>🔍 FILTROS Y MOTIVO</h3>
-            <div class="filtros">
-                <select id="fCurso"></select>
-                <select id="fDivision"></select>
-                <select id="fTurno"></select>
-                <select id="fEspecialidad"></select>
+            <div id="status">
+
+                USUARIO:
+                <strong id="user-role">...</strong>
+
+                |
+
+                <strong id="nombre-sel">
+                    ESPERANDO ACCIÓN
+                </strong>
+
             </div>
-            
-            <div class="motivo-box" style="margin-top: 12px;">
-                <select id="causa" style="width: 100%; border-color: var(--accent); font-weight: bold;">
-                    <option value="">⚠️ SELECCIONAR DESTINO...</option>
-                    <option value="Baño">🚻 Baño</option>
-                    <option value="Enfermería">🏥 Enfermería</option>
-                    <option value="Dirección">🏫 Dirección</option>
-                    <option value="Preceptoría">📁 Preceptoría</option>
-                    <option value="Biblioteca">📚 Biblioteca</option>
-                    <option value="Otro">📌 Otro</option>
-                </select>
-            </div>
+
         </div>
-    </div>
 
-    <div id="status-container" style="display:none;">
-        <div id="status">USUARIO: <strong id="user-role">...</strong> | <strong id="nombre-sel">ESPERANDO ACCIÓN</strong></div>
-    </div>
+        <!-- GRID -->
+        <div id="grid"></div>
 
-    <div id="grid"></div>
+    </main>
 
     <script src="app.js"></script>
+
 </body>
 </html>
