@@ -1,394 +1,1038 @@
-const URL = "https://script.google.com/macros/s/AKfycbxbAEu9d9joaeUItVH_T0mI_iK7AL2QK8xEGgVGfvu5zdAT6S4EbesydZSk0MXNmfb05g/exec";
+/* =========================================================
+   app.js - SISTEMA COMPLETO IPEM 146
+   VERSION PROFESIONAL + PRECEPTOR
+========================================================= */
+
+const URL =
+  "https://script.google.com/macros/s/AKfycbw6ZfthoxnpLFGctC5CoO78bAD-i0-0SK1G1_bYcoT5beaQK3Vil_m2U53zOw6PhllC/exec";
+
+/* =========================================================
+   VARIABLES
+========================================================= */
 
 let alumnos = [];
 let docentes = [];
 let salidas = [];
+let historial = [];
+
 let usuarioActivo = null;
 
-fetch(URL)
-.then(r => r.json())
-.then(data => {
+let timers = {};
 
-    alumnos = data.alumnos || [];
-    docentes = data.docentes || [];
-    salidas = data.salidas || [];
+let procesando = false;
 
-    cargarDocentes();
-    cargarFiltros();
+/* =========================================================
+   INIT
+========================================================= */
 
+window.addEventListener("load", () => {
+
+  // TEMA
+  if (localStorage.getItem("modoTema") === "claro") {
+
+    document.body.classList.add("light-mode");
+
+    const btn = document.getElementById("themeToggle");
+
+    if (btn) btn.innerHTML = "☀️";
+  }
+
+  // SESIÓN
+  const sesionGuardada =
+    localStorage.getItem("sesionActiva");
+
+  if (sesionGuardada) {
+
+    usuarioActivo = JSON.parse(sesionGuardada);
+
+    activarSistema();
+  }
+
+  cargarDatos();
 });
 
-function cargarDocentes(){
+/* =========================================================
+   CARGAR DATOS
+========================================================= */
 
-    const sel = document.getElementById("docentes");
+async function cargarDatos() {
 
-    sel.innerHTML = `<option value="">Usuario...</option>`;
+  try {
 
-    docentes.forEach(d => {
+    const loader =
+      document.getElementById("loader");
 
-        sel.innerHTML += `
-            <option value="${d.nombre}">
-                ${d.nombre}
-            </option>
-        `;
+    loader.style.display = "flex";
 
-    });
+    const response = await fetch(URL);
 
+    if (!response.ok) {
+      throw new Error("Error");
+    }
+
+    const data = await response.json();
+
+    alumnos = data.alumnos || [];
+
+    docentes = data.docentes || [];
+
+    salidas = data.salidas || [];
+
+    historial = data.historial || [];
+
+    cargarDocentes();
+
+    cargarFiltros();
+
+    render();
+
+    renderHistorial();
+
+    loader.style.display = "none";
+
+  } catch (error) {
+
+    console.error(error);
+
+    document.getElementById("loader").innerHTML = `
+      <div style="
+        color:red;
+        font-size:20px;
+        text-align:center;
+      ">
+        ❌ Error de conexión
+      </div>
+    `;
+  }
 }
 
-function verificarAcceso(){
+/* =========================================================
+   LOGIN
+========================================================= */
 
-    const nom = document.getElementById("docentes").value;
-    const pin = document.getElementById("passDocente").value;
+async function verificarAcceso() {
 
-    const user = docentes.find(
-        d => d.nombre === nom &&
-        String(d.password) === String(pin)
+  if (procesando) return;
+
+  procesando = true;
+
+  const btn =
+    document.getElementById("btnLogin");
+
+  btn.disabled = true;
+
+  btn.classList.add("loading");
+
+  const nombre =
+    document.getElementById("docentes").value;
+
+  const pin =
+    document.getElementById("passDocente").value;
+
+  const user = docentes.find(
+    (d) =>
+      d.nombre === nombre &&
+      String(d.password) === String(pin)
+  );
+
+  await new Promise(r => setTimeout(r, 600));
+
+  if (user) {
+
+    usuarioActivo = user;
+
+    localStorage.setItem(
+      "sesionActiva",
+      JSON.stringify(user)
     );
 
-    if(user){
+    activarSistema();
 
-        usuarioActivo = user;
+    showToast(
+      `✅ Bienvenido ${user.nombre}`
+    );
 
-        document.querySelector(".grupo-sesion").style.display = "none";
+  } else {
 
-        document.getElementById("seccion-filtros").style.display = "block";
+    const input =
+      document.getElementById("passDocente");
 
-        document.getElementById("status-container").style.display = "block";
+    input.classList.add("shake");
 
-        document.getElementById("user-role").innerText =
-        user.tipo.toUpperCase();
+    setTimeout(() => {
+      input.classList.remove("shake");
+    }, 500);
 
-        render();
+    showToast(
+      "❌ PIN incorrecto",
+      "error"
+    );
+  }
 
-    }else{
+  btn.disabled = false;
 
-        alert("❌ PIN INCORRECTO");
+  btn.classList.remove("loading");
 
+  procesando = false;
+}
+
+/* =========================================================
+   ACTIVAR SISTEMA
+========================================================= */
+
+function activarSistema() {
+
+  document.querySelector(
+    ".grupo-sesion"
+  ).style.display = "none";
+
+  [
+    "logoutBtn",
+    "seccion-filtros",
+    "contador-container",
+    "buscador-box",
+    "historial-container",
+    "changePassBtn"
+  ].forEach((id) => {
+
+    const el = document.getElementById(id);
+
+    if (el) {
+      el.style.display = "block";
+    }
+  });
+
+  // ROL
+  const rolBox =
+    document.getElementById("rolActivo");
+
+  if (rolBox) {
+
+    rolBox.innerHTML =
+      `👤 ${usuarioActivo.nombre}
+       (${usuarioActivo.rol || "Docente"})`;
+  }
+
+  render();
+}
+
+/* =========================================================
+   RENDER
+========================================================= */
+
+function render() {
+
+  const grid =
+    document.getElementById("grid");
+
+  if (!grid) return;
+
+  const curso =
+    document.getElementById("fCurso").value;
+
+  const busqueda =
+    document.getElementById("buscador")
+      .value
+      .toLowerCase();
+
+  if (!curso) {
+
+    grid.innerHTML = `
+      <div class="panel"
+           style="text-align:center">
+        📚 Seleccione curso
+      </div>
+    `;
+
+    return;
+  }
+
+  const filtrados = alumnos.filter((a) => {
+
+    return (
+      a.curso == curso &&
+      (
+        a.nombre.toLowerCase()
+          .includes(busqueda) ||
+        String(a.dni)
+          .includes(busqueda)
+      )
+    );
+  });
+
+  actualizarContadores(filtrados);
+
+  grid.innerHTML = "";
+
+  const fragment =
+    document.createDocumentFragment();
+
+  filtrados.forEach((a) => {
+
+    const reg = salidas.find(
+      (s) =>
+        s.dni == a.dni &&
+        !s.regreso
+    );
+
+    const div =
+      document.createElement("div");
+
+    div.id = `card-${a.dni}`;
+
+    // ESTADO
+    let estado = "in";
+
+    if (a.estado === "AUSENTE") {
+      estado = "ausente";
     }
 
-}
+    else if (
+      a.estado === "TARDE"
+    ) {
+      estado = "tarde";
+    }
 
-function cargarFiltros(){
+    else if (reg) {
+      estado = "out";
+    }
 
-    ["fCurso","fDivision","fTurno","fEspecialidad"]
-    .forEach(id => {
+    div.className =
+      `alumno ${estado}`;
 
-        const key = id.replace('f','').toLowerCase();
+    let html = `
+      <span class="nombre">
+        ${a.nombre}
+      </span>
+    `;
 
-        const sel = document.getElementById(id);
+    // =====================
+    // AUSENTE
+    // =====================
 
-        sel.innerHTML = `<option value="">${key.toUpperCase()}</option>`;
+    if (a.estado === "AUSENTE") {
 
-        [...new Set(alumnos.map(a => a[key]))]
-        .sort()
-        .forEach(v => {
+      html += `
+        <div class="label-ausente">
+          ❌ AUSENTE
+        </div>
+      `;
+    }
 
-            if(v){
+    // =====================
+    // TARDE
+    // =====================
 
-                sel.innerHTML += `
-                    <option value="${v}">
-                        ${v}
-                    </option>
-                `;
+    else if (a.estado === "TARDE") {
 
-            }
+      html += `
+        <div class="motivo-destacado">
+          ⏰ LLEGADA TARDE
+        </div>
+      `;
+    }
 
-        });
+    // =====================
+    // AFUERA
+    // =====================
 
-        sel.onchange = render;
+    else if (reg) {
 
-    });
+      html += `
+        <div class="motivo-destacado">
+          🚪 ${reg.causa.toUpperCase()}
+        </div>
+      `;
 
-}
+      if (
+        reg.causa.toLowerCase() === "baño"
+      ) {
 
-function render(){
-
-    const grid = document.getElementById("grid");
-
-    const curso = document.getElementById("fCurso").value;
-    const division = document.getElementById("fDivision").value;
-    const turno = document.getElementById("fTurno").value;
-    const especialidad = document.getElementById("fEspecialidad").value;
-
-    if(!usuarioActivo || !curso) return;
-
-    grid.innerHTML = "";
-
-    const esPreceptor =
-    usuarioActivo.tipo.toLowerCase() === "preceptor";
-
-    alumnos
-    .filter(a => {
-
-        return (!curso || a.curso == curso) &&
-               (!division || a.division == division) &&
-               (!turno || a.turno == turno) &&
-               (!especialidad || a.especialidad == especialidad);
-
-    })
-    .forEach(a => {
-
-        const registro =
-        salidas.find(s => s.dni == a.dni && !s.regreso);
-
-        const esAusente = a.ausente === "AUSENTE";
-
-        const div = document.createElement("div");
-
-        div.className =
-        `alumno ${registro ? "out" : "in"} ${esAusente ? "ausente" : ""}`;
-
-        let checkHTML = "";
-
-        if(esPreceptor){
-
-            checkHTML = `
-                <input
-                    type="checkbox"
-                    class="ausente-check"
-                    ${esAusente ? "checked" : ""}
-                    onclick="toggleAusencia(event, '${a.dni}')"
-                >
-            `;
-
-        }
-
-        let estadoLabel = "";
-
-        if(esAusente){
-
-            estadoLabel = `
-                <div class="label-ausente">
-                    ❌ AUSENTE
-                </div>
-            `;
-
-        }else if(registro){
-
-            estadoLabel = `
-                <div class="motivo-destacado">
-                    ${registro.causa.toUpperCase()}
-                </div>
-            `;
-
-        }else{
-
-            estadoLabel = `
-                <div class="estado-aula">
-                    ● EN AULA
-                </div>
-            `;
-
-        }
-
-        div.innerHTML = `
-            ${checkHTML}
-            <span class="nombre">${a.nombre}</span>
-            ${estadoLabel}
+        html += `
+          <div class="timer-box">
+            ⏳
+            <span id="timer-${a.dni}">
+              15:00
+            </span>
+          </div>
         `;
 
-        if(esAusente){
-
-            div.onclick = () => {
-
-                if(!esPreceptor){
-                    alert("Alumno Ausente.");
-                }
-
-            };
-
-        }else{
-
-            div.onclick = () =>
-            procesarAccion(a, registro);
-
-        }
-
-        grid.appendChild(div);
-
-    });
-
-}
-
-function toggleAusencia(event, dni){
-
-    event.stopPropagation();
-
-    const nuevoEstado =
-    event.target.checked ? "AUSENTE" : "PRESENTE";
-
-    fetch(URL,{
-        method:"POST",
-        body:JSON.stringify({
-            dni:dni,
-            tipoAccion:"asistencia",
-            estado:nuevoEstado
-        })
-    })
-    .then(() => render());
-
-}
-
-function procesarAccion(alumno, registro){
-
-    const causaSel =
-    document.getElementById("causa").value;
-
-    if(!registro && !causaSel){
-
-        return alert("⚠️ Seleccioná un DESTINO.");
-
+        iniciarCronometro(
+          a.dni,
+          reg.inicioTime
+        );
+      }
     }
 
-    const data = {
+    // =====================
+    // EN AULA
+    // =====================
 
-        ...alumno,
+    else {
 
-        docente:usuarioActivo.nombre,
+      html += `
+        <div class="estado-aula">
+          ✅ EN AULA
+        </div>
+      `;
+    }
 
-        tipo:registro ? "regreso" : "salida",
+    // =====================
+    // BOTONES PRECEPTOR
+    // =====================
 
-        causa:registro ? "" : causaSel
+    if (
+      usuarioActivo &&
+      usuarioActivo.rol === "Preceptor"
+    ) {
 
-    };
+      html += `
+        <div class="acciones-preceptor">
 
-    fetch(URL,{
-        method:"POST",
-        body:JSON.stringify(data)
-    })
-    .then(() => {
+          <button
+            class="btn-mini rojo"
+            onclick="marcarAusente('${a.dni}')">
 
-        if(registro){
+            AUS
 
-            registro.regreso = "OK";
+          </button>
 
-        }else{
+          <button
+            class="btn-mini naranja"
+            onclick="marcarTarde('${a.dni}')">
 
-            salidas.push({
-                dni:alumno.dni,
-                regreso:"",
-                causa:causaSel
-            });
+            TARDE
 
+          </button>
+
+          <button
+            class="btn-mini azul"
+            onclick="retiroTutor('${a.dni}')">
+
+            RETIRO
+
+          </button>
+
+        </div>
+      `;
+    }
+
+    div.innerHTML = html;
+
+    // CLICK NORMAL
+    if (a.estado !== "AUSENTE") {
+
+      div.onclick = (e) => {
+
+        if (
+          e.target.tagName !== "BUTTON"
+        ) {
+
+          procesarAccion(
+            a,
+            reg,
+            div
+          );
         }
+      };
+    }
 
-        render();
+    fragment.appendChild(div);
+  });
 
-    });
-
+  grid.appendChild(fragment);
 }
 
-function cerrarSesion(){
+/* =========================================================
+   PROCESAR ACCIÓN
+========================================================= */
+
+async function procesarAccion(
+  alumno,
+  registro,
+  elemento
+) {
+
+  if (procesando) return;
+
+  const causa =
+    document.getElementById("causa")
+      .value;
+
+  if (!registro && !causa) {
+
+    showToast(
+      "📍 Seleccione destino",
+      "error"
+    );
+
+    return;
+  }
+
+  procesando = true;
+
+  elemento.classList.add("loading");
+
+  const data = {
+
+    dni: alumno.dni,
+
+    nombre: alumno.nombre,
+
+    docente: usuarioActivo.nombre,
+
+    tipo: registro
+      ? "regreso"
+      : "salida",
+
+    causa: registro
+      ? ""
+      : causa,
+
+    tipoAccion: "movimiento"
+  };
+
+  try {
+
+    await fetch(URL, {
+
+      method: "POST",
+
+      body: JSON.stringify(data)
+    });
+
+    // HISTORIAL
+    agregarHistorial(
+      alumno.nombre,
+      registro
+        ? "REGRESO"
+        : causa,
+      usuarioActivo.nombre
+    );
+
+    // REGRESO
+    if (registro) {
+
+      clearInterval(
+        timers[alumno.dni]
+      );
+
+      delete timers[alumno.dni];
+
+      salidas = salidas.filter(
+        (s) =>
+          s.dni != alumno.dni
+      );
+
+      showToast(
+        "✅ Regreso registrado"
+      );
+    }
+
+    // SALIDA
+    else {
+
+      salidas.push({
+
+        dni: alumno.dni,
+
+        causa,
+
+        inicioTime: new Date()
+      });
+
+      showToast(
+        "🚪 Salida registrada"
+      );
+    }
+
+    render();
+
+  } catch (error) {
+
+    console.error(error);
+
+    showToast(
+      "❌ Error",
+      "error"
+    );
+  }
+
+  procesando = false;
+}
+
+/* =========================================================
+   PRECEPTOR
+========================================================= */
+
+function marcarAusente(dni) {
+
+  const alumno =
+    alumnos.find((a) => a.dni == dni);
+
+  if (!alumno) return;
+
+  alumno.estado = "AUSENTE";
+
+  agregarHistorial(
+    alumno.nombre,
+    "AUSENTE",
+    usuarioActivo.nombre
+  );
+
+  render();
+
+  showToast("❌ Ausente");
+}
+
+function marcarTarde(dni) {
+
+  const alumno =
+    alumnos.find((a) => a.dni == dni);
+
+  if (!alumno) return;
+
+  alumno.estado = "TARDE";
+
+  agregarHistorial(
+    alumno.nombre,
+    "LLEGADA TARDE",
+    usuarioActivo.nombre
+  );
+
+  render();
+
+  showToast("⏰ Llegada tarde");
+}
+
+function retiroTutor(dni) {
+
+  const alumno =
+    alumnos.find((a) => a.dni == dni);
+
+  if (!alumno) return;
+
+  alumno.estado = "RETIRO";
+
+  agregarHistorial(
+    alumno.nombre,
+    "RETIRO PADRE/TUTOR",
+    usuarioActivo.nombre
+  );
+
+  render();
+
+  showToast("👨‍👩‍👦 Retiro");
+}
+
+/* =========================================================
+   HISTORIAL
+========================================================= */
+
+function agregarHistorial(
+  alumno,
+  accion,
+  usuario
+) {
+
+  historial.unshift({
+
+    alumno,
+
+    accion,
+
+    usuario,
+
+    hora:
+      new Date()
+        .toLocaleTimeString()
+  });
+
+  renderHistorial();
+}
+
+function renderHistorial() {
+
+  const box =
+    document.getElementById("historial");
+
+  if (!box) return;
+
+  box.innerHTML = "";
+
+  historial
+    .slice(0, 30)
+    .forEach((h) => {
+
+      box.innerHTML += `
+        <div class="historial-item">
+
+          <strong>
+            ${h.alumno}
+          </strong>
+
+          - ${h.accion}
+
+          <br>
+
+          👤 ${h.usuario}
+
+          • 🕒 ${h.hora}
+
+        </div>
+      `;
+    });
+}
+
+function limpiarHistorial() {
+
+  historial = [];
+
+  renderHistorial();
+
+  showToast("🗑 Historial limpio");
+}
+
+/* =========================================================
+   CAMBIAR CONTRASEÑA
+========================================================= */
+
+function cambiarPassword() {
+
+  const actual =
+    prompt("Contraseña actual");
+
+  if (
+    String(actual) !==
+    String(usuarioActivo.password)
+  ) {
+
+    showToast(
+      "❌ Contraseña incorrecta",
+      "error"
+    );
+
+    return;
+  }
+
+  const nueva =
+    prompt("Nueva contraseña");
+
+  if (!nueva || nueva.length < 4) {
+
+    showToast(
+      "⚠ Mínimo 4 caracteres",
+      "error"
+    );
+
+    return;
+  }
+
+  usuarioActivo.password = nueva;
+
+  localStorage.setItem(
+    "sesionActiva",
+    JSON.stringify(usuarioActivo)
+  );
+
+  showToast(
+    "🔐 Contraseña cambiada"
+  );
+}
+
+/* =========================================================
+   CRONÓMETRO
+========================================================= */
+
+function iniciarCronometro(
+  dni,
+  inicio
+) {
+
+  if (timers[dni]) {
+
+    clearInterval(
+      timers[dni]
+    );
+  }
+
+  const LIMITE = 15 * 60;
+
+  timers[dni] = setInterval(() => {
+
+    const restante =
+      LIMITE -
+      Math.floor(
+        (
+          Date.now() -
+          new Date(inicio)
+            .getTime()
+        ) / 1000
+      );
+
+    const display =
+      document.getElementById(
+        `timer-${dni}`
+      );
+
+    const card =
+      document.getElementById(
+        `card-${dni}`
+      );
+
+    if (!display || !card) {
+
+      clearInterval(
+        timers[dni]
+      );
+
+      return;
+    }
+
+    if (restante <= 0) {
+
+      display.innerText =
+        "⛔ TIEMPO";
+
+      card.classList.add(
+        "tiempo-agotado"
+      );
+
+      return;
+    }
+
+    const m =
+      Math.floor(restante / 60);
+
+    const s =
+      restante % 60;
+
+    display.innerText =
+      `${m}:${s < 10 ? "0" : ""}${s}`;
+
+  }, 1000);
+}
+
+/* =========================================================
+   CONTADORES
+========================================================= */
+
+function actualizarContadores(
+  filtrados
+) {
+
+  const total =
+    filtrados.length;
+
+  const ausentes =
+    filtrados.filter(
+      (a) =>
+        a.estado === "AUSENTE"
+    ).length;
+
+  const afuera =
+    filtrados.filter(
+      (a) =>
+        salidas.find(
+          (s) =>
+            s.dni == a.dni
+        )
+    ).length;
+
+  document.getElementById(
+    "total-alumnos"
+  ).innerText = total;
+
+  document.getElementById(
+    "en-aula"
+  ).innerText =
+    total - ausentes - afuera;
+
+  document.getElementById(
+    "afuera"
+  ).innerText = afuera;
+
+  document.getElementById(
+    "ausentes"
+  ).innerText = ausentes;
+}
+
+/* =========================================================
+   DOCENTES
+========================================================= */
+
+function cargarDocentes() {
+
+  const select =
+    document.getElementById(
+      "docentes"
+    );
+
+  select.innerHTML =
+    `<option value="">
+      Seleccione Usuario...
+    </option>`;
+
+  docentes.forEach((d) => {
+
+    select.innerHTML += `
+      <option value="${d.nombre}">
+        ${d.nombre}
+        (${d.rol || "Docente"})
+      </option>
+    `;
+  });
+}
+
+/* =========================================================
+   FILTROS
+========================================================= */
+
+function cargarFiltros() {
+
+  [
+    "fCurso",
+    "fDivision",
+    "fTurno",
+    "fEspecialidad"
+  ].forEach((id) => {
+
+    const key =
+      id.replace("f", "")
+        .toLowerCase();
+
+    const select =
+      document.getElementById(id);
+
+    select.innerHTML =
+      `<option value="">
+        ${key.toUpperCase()}
+      </option>`;
+
+    [
+      ...new Set(
+        alumnos.map(
+          (a) => a[key]
+        )
+      )
+    ]
+    .sort()
+    .forEach((v) => {
+
+      if (v) {
+
+        select.innerHTML += `
+          <option value="${v}">
+            ${v}
+          </option>
+        `;
+      }
+    });
+
+    select.onchange = render;
+  });
+}
+
+/* =========================================================
+   TOAST
+========================================================= */
+
+function showToast(
+  mensaje,
+  tipo = "success"
+) {
+
+  const container =
+    document.getElementById(
+      "toast-container"
+    );
+
+  const toast =
+    document.createElement("div");
+
+  toast.className =
+    `toast ${
+      tipo === "error"
+        ? "error"
+        : ""
+    }`;
+
+  toast.innerText = mensaje;
+
+  container.appendChild(toast);
+
+  setTimeout(() => {
+
+    toast.classList.add("hide");
+
+    setTimeout(() => {
+
+      toast.remove();
+
+    }, 400);
+
+  }, 2500);
+}
+
+/* =========================================================
+   THEME
+========================================================= */
+
+function toggleTheme() {
+
+  document.body.classList.toggle(
+    "light-mode"
+  );
+
+  const claro =
+    document.body.classList.contains(
+      "light-mode"
+    );
+
+  localStorage.setItem(
+    "modoTema",
+    claro
+      ? "claro"
+      : "oscuro"
+  );
+
+  document.getElementById(
+    "themeToggle"
+  ).innerHTML =
+    claro
+      ? "☀️"
+      : "🌙";
+}
+
+/* =========================================================
+   LOGOUT
+========================================================= */
+
+function cerrarSesion() {
+
+  Object.keys(timers)
+    .forEach((k) => {
+
+      clearInterval(
+        timers[k]
+      );
+    });
+
+  timers = {};
+
+  usuarioActivo = null;
+
+  localStorage.removeItem(
+    "sesionActiva"
+  );
+
+  showToast(
+    "👋 Sesión cerrada"
+  );
+
+  setTimeout(() => {
 
     location.reload();
 
-}
-
-function togglePassword(){
-
-    const input =
-    document.getElementById("passDocente");
-
-    const btn =
-    document.querySelector(".toggle-pass");
-
-    if(input.type === "password"){
-
-        input.type = "text";
-        btn.innerHTML = "🙈";
-
-    }else{
-
-        input.type = "password";
-        btn.innerHTML = "👁";
-
-    }
-
-}
-
-function mostrarCambioPassword(){
-
-    const panel =
-    document.getElementById("panel-password");
-
-    if(panel.style.display === "none"){
-
-        panel.style.display = "flex";
-
-    }else{
-
-        panel.style.display = "none";
-
-    }
-
-}
-
-function cambiarPassword(){
-
-    const docente =
-    document.getElementById("docentes").value;
-
-    const actual =
-    document.getElementById("actualPass").value;
-
-    const nueva =
-    document.getElementById("nuevaPass").value;
-
-    const repetir =
-    document.getElementById("repetirPass").value;
-
-    if(!docente){
-
-        return alert("⚠️ Seleccioná un usuario.");
-
-    }
-
-    const user = docentes.find(
-        d =>
-        d.nombre === docente &&
-        String(d.password) === String(actual)
-    );
-
-    if(!user){
-
-        return alert("❌ Contraseña actual incorrecta.");
-
-    }
-
-    if(nueva.length < 4){
-
-        return alert("⚠️ La nueva contraseña es muy corta.");
-
-    }
-
-    if(nueva !== repetir){
-
-        return alert("⚠️ Las contraseñas no coinciden.");
-
-    }
-
-    fetch(URL,{
-        method:"POST",
-        body:JSON.stringify({
-            tipoAccion:"cambiarPassword",
-            docente:docente,
-            nuevaPassword:nueva
-        })
-    })
-    .then(() => {
-
-        alert("✅ Contraseña actualizada.");
-
-        user.password = nueva;
-
-        document.getElementById("actualPass").value = "";
-        document.getElementById("nuevaPass").value = "";
-        document.getElementById("repetirPass").value = "";
-
-        document.getElementById("panel-password")
-        .style.display = "none";
-
-    });
-
+  }, 700);
 }
