@@ -1,329 +1,170 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GESTIÓN SALIDAS | IPEM 146</title>
 
-<head>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
 
-    <meta charset="UTF-8">
+    <link rel="stylesheet" href="style.css" />
+  </head>
 
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0">
-
-    <title>
-        GESTIÓN SALIDAS | IPEM 146
-    </title>
-
-    <!-- GOOGLE FONTS -->
-    <link rel="preconnect"
-          href="https://fonts.googleapis.com">
-
-    <link rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossorigin>
-
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap"
-          rel="stylesheet">
-
-    <!-- CSS -->
-    <link rel="stylesheet"
-          href="style.css">
-
-</head>
-
-<body>
-
-    <!-- ========================= -->
-    <!-- LOADER -->
-    <!-- ========================= -->
-
+  <body>
     <div id="loader">
-
-        <div class="spinner"></div>
-
-        <p>
-            Cargando sistema...
-        </p>
-
+      <div class="spinner"></div>
+      <p>Cargando sistema...</p>
     </div>
-
-    <!-- ========================= -->
-    <!-- TOAST -->
-    <!-- ========================= -->
 
     <div id="toast-container"></div>
 
-    <!-- ========================= -->
-    <!-- CONTENEDOR -->
-    <!-- ========================= -->
-
     <div class="container">
-
-        <!-- ========================= -->
-        <!-- HEADER -->
-        <!-- ========================= -->
-
-        <header>
-
-            <div class="header-top">
-
-                <div class="titulo-box">
-
-                    <h1>
-                        📊 GESTIÓN SALIDAS
-                    </h1>
-
-                    <span>
-                        IPEM 146 "CENTENARIO"
-                    </span>
-
-                </div>
-
-                <div class="header-buttons">
-
-                    <!-- TEMA -->
-                    <button id="themeToggle"
-                            class="theme-toggle"
-                            onclick="toggleTheme()"
-                            title="Cambiar tema">
-
-                        🌙
-
-                    </button>
-
-                    <!-- LOGOUT -->
-                    <button id="logoutBtn"
-                            class="logout-btn"
-                            onclick="cerrarSesion()"
-                            style="display:none;"
-                            title="Cerrar sesión">
-
-                        🚪
-
-                    </button>
-
-                </div>
-
-            </div>
-
-        </header>
-
-        <!-- ========================= -->
-        <!-- LOGIN -->
-        <!-- ========================= -->
-
-        <section class="panel grupo-sesion">
-
-            <h3>
-                🔑 ACCESO AL PERSONAL
-            </h3>
-
-            <div class="controles">
-
-                <!-- DOCENTE -->
-                <select id="docentes">
-
-                    <option value="">
-                        Seleccione Usuario...
-                    </option>
-
-                </select>
-
-                <!-- PIN -->
-                <input type="password"
-                       id="passDocente"
-                       placeholder="PIN"
-                       autocomplete="off">
-
-                <!-- BOTÓN -->
-                <button id="btnLogin"
-                        class="btn-main"
-                        onclick="verificarAcceso()">
-
-                    ENTRAR
-
-                </button>
-
-            </div>
-
-        </section>
-
-        <!-- ========================= -->
-        <!-- FILTROS -->
-        <!-- ========================= -->
-
-        <section id="seccion-filtros"
-                 class="panel"
-                 style="display:none;">
-
-            <div class="filtros">
-
-                <select id="fCurso"></select>
-
-                <select id="fDivision"></select>
-
-                <select id="fTurno"></select>
-
-                <select id="fEspecialidad"></select>
-
-            </div>
-
-            <!-- DESTINO -->
-
-            <div class="destino-container">
-
-                <label for="causa">
-                    📍 DESTINO REQUERIDO
-                </label>
-
-                <select id="causa">
-
-                    <option value="">
-                        -- SELECCIONAR DESTINO --
-                    </option>
-
-                    <option value="Baño">
-                        🚻 Baño (Máx 15 min)
-                    </option>
-
-                    <option value="Dirección">
-                        🏫 Dirección
-                    </option>
-
-                    <option value="Preceptoría">
-                        📁 Preceptoría
-                    </option>
-
-                    <option value="Biblioteca">
-                        📚 Biblioteca
-                    </option>
-
-                </select>
-
-            </div>
-
-        </section>
-
-        <!-- ========================= -->
-        <!-- CONTADORES -->
-        <!-- ========================= -->
-
-        <section id="contador-container"
-                 style="display:none;">
-
-            <div class="contador-box">
-
-                <div class="contador-item total">
-
-                    TOTAL
-
-                    <strong id="total-alumnos">
-                        0
-                    </strong>
-
-                </div>
-
-                <div class="contador-item aula">
-
-                    EN AULA
-
-                    <strong id="en-aula">
-                        0
-                    </strong>
-
-                </div>
-
-                <div class="contador-item salida">
-
-                    AFUERA
-
-                    <strong id="afuera">
-                        0
-                    </strong>
-
-                </div>
-
-                <div class="contador-item ausente">
-
-                    AUSENTES
-
-                    <strong id="ausentes">
-                        0
-                    </strong>
-
-                </div>
-
-            </div>
-
-        </section>
-
-        <!-- ========================= -->
-        <!-- BUSCADOR -->
-        <!-- ========================= -->
-
-        <section id="buscador-box"
-                 class="panel"
-                 style="display:none;">
-
-            <input type="text"
-                   id="buscador"
-                   placeholder="🔍 Buscar por nombre o DNI..."
-                   autocomplete="off"
-                   oninput="render()">
-
-        </section>
-
-        <!-- ========================= -->
-        <!-- GRID -->
-        <!-- ========================= -->
-
-        <main id="grid"></main>
-
-        <!-- ========================= -->
-        <!-- HISTORIAL -->
-        <!-- ========================= -->
-
-        <section id="historial-container"
-                 class="panel"
-                 style="display:none;">
-
-            <div class="historial-top">
-
-                <h2>
-                    📋 MOVIMIENTOS RECIENTES
-                </h2>
-
-                <button class="btn-clear"
-                        onclick="limpiarHistorial()">
-
-                    🗑
-
-                </button>
-
-            </div>
-
-            <div id="historial"></div>
-
-        </section>
-
+      <header>
+        <div class="header-top">
+          <div class="titulo-box">
+            <h1>📊 GESTIÓN SALIDAS</h1>
+            <span>IPEM 146 "CENTENARIO"</span>
+          </div>
+          <div id="rolActivo" class="rol-box"></div>
+          <div class="header-buttons">
+            <button
+              id="themeToggle"
+              class="theme-toggle"
+              onclick="toggleTheme()"
+              title="Cambiar tema"
+            >
+              🌙
+            </button>
+            <button
+              id="logoutBtn"
+              class="logout-btn"
+              onclick="cerrarSesion()"
+              style="display: none"
+              title="Cerrar sesión"
+            >
+              🚪
+            </button>
+            <button
+              id="changePassBtn"
+              class="theme-toggle"
+              onclick="cambiarPassword()"
+              style="display: none"
+              title="Cambiar contraseña"
+            >
+              🔐
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <section class="panel grupo-sesion">
+        <h3>🔑 ACCESO AL PERSONAL</h3>
+        <div class="controles">
+          <select id="docentes">
+            <option value="">Seleccione Usuario...</option>
+          </select>
+          <input
+            type="password"
+            id="passDocente"
+            placeholder="PIN"
+            autocomplete="off"
+          />
+          <button id="btnLogin" class="btn-main" onclick="verificarAcceso()">
+            ENTRAR
+          </button>
+        </div>
+      </section>
+
+      <section id="seccion-filtros" class="panel" style="display: none">
+        <div class="filtros">
+          <select id="fCurso">
+            <option value="">-- CURSO --</option>
+          </select>
+          <select id="fDivision">
+            <option value="">-- DIVISIÓN --</option>
+          </select>
+          <select id="fTurno">
+            <option value="">-- TURNO --</option>
+          </select>
+          <select id="fEspecialidad">
+            <option value="">-- ESPECIALIDAD --</option>
+          </select>
+        </div>
+        <div class="destino-container">
+          <label for="causa">📍 DESTINO REQUERIDO</label>
+          <select id="causa">
+            <option value="">-- SELECCIONAR DESTINO --</option>
+            <option value="Baño">Utilitarios 🚻 Baño (Máx 15 min)</option>
+            <option value="Dirección">🏫 Dirección</option>
+            <option value="Preceptoría">📁 Preceptoría</option>
+            <option value="Biblioteca">📚 Biblioteca</option>
+          </select>
+        </div>
+      </section>
+
+      <section id="contador-container" style="display: none">
+        <div class="contador-box">
+          <div class="contador-item total">
+            TOTAL <strong id="total-alumnos">0</strong>
+          </div>
+          <div class="contador-item aula">
+            EN AULA <strong id="en-aula">0</strong>
+          </div>
+          <div class="contador-item salida">
+            AFUERA <strong id="afuera">0</strong>
+          </div>
+          <div class="contador-item ausente">
+            AUSENTES <strong id="ausentes">0</strong>
+          </div>
+        </div>
+      </section>
+
+      <section id="buscador-box" class="panel" style="display: none">
+        <input
+          type="text"
+          id="buscador"
+          placeholder="🔍 Buscar por nombre o DNI..."
+          autocomplete="off"
+          oninput="render()"
+        />
+      </section>
+
+      <main id="grid"></main>
+
+      <section id="historial-container" class="panel" style="display: none">
+        <div class="historial-top">
+          <h2>📋 MOVIMIENTOS RECIENTES</h2>
+          <div>
+            <button
+              class="btn-clear"
+              onclick="limpiarHistorial()"
+              style="display: inline-flex"
+            >
+              🗑
+            </button>
+            <button
+              class="theme-toggle"
+              style="margin-left: 8px; display: inline-flex"
+              onclick="exportHistorialPDF()"
+              title="Exportar PDF"
+            >
+              📄
+            </button>
+          </div>
+        </div>
+        <div id="historial"></div>
+      </section>
     </div>
 
-    <!-- ========================= -->
-    <!-- AUDIO ALERTA -->
-    <!-- ========================= -->
-
-    <audio id="alertSound"
-           preload="auto">
-
-        <source src="alert.mp3"
-                type="audio/mpeg">
-
+    <audio id="alertSound" preload="auto">
+      <source src="alert.mp3" type="audio/mpeg" />
     </audio>
 
-    <!-- ========================= -->
-    <!-- SCRIPT -->
-    <!-- ========================= -->
-
     <script src="app.js"></script>
-
-</body>
-
+  </body>
 </html>

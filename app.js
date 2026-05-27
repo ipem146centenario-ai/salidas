@@ -1,13 +1,12 @@
 /* =========================================================
-   app.js - SISTEMA COMPLETO IPEM 146
-   VERSION PROFESIONAL + PRECEPTOR
+   APP.JS COMPLETO CORREGIDO (CON ACCESO, FILTROS Y TIMERS)
 ========================================================= */
 
 const URL =
-  "https://script.google.com/macros/s/AKfycbw6ZfthoxnpLFGctC5CoO78bAD-i0-0SK1G1_bYcoT5beaQK3Vil_m2U53zOw6PhllC/exec";
+"https://script.google.com/macros/s/AKfycbyYcYF196pO6ytMWtKGGRgJodyZ6rYcBGPwfEEGfHf_zBfLwHvglf2tZhgXMd1lK3c/exec";
 
 /* =========================================================
-   VARIABLES
+   VARIABLES GLOBALES
 ========================================================= */
 
 let alumnos = [];
@@ -15,1024 +14,512 @@ let docentes = [];
 let salidas = [];
 let historial = [];
 
-let usuarioActivo = null;
+let usuarioActivo = null; // Almacenará al usuario logueado
 
 let timers = {};
 
 let procesando = false;
 
 /* =========================================================
-   INIT
+   INIT / DISPARADOR INICIAL
 ========================================================= */
 
 window.addEventListener("load", () => {
-
-  // TEMA
-  if (localStorage.getItem("modoTema") === "claro") {
-
-    document.body.classList.add("light-mode");
-
-    const btn = document.getElementById("themeToggle");
-
-    if (btn) btn.innerHTML = "☀️";
-  }
-
-  // SESIÓN
-  const sesionGuardada =
-    localStorage.getItem("sesionActiva");
-
-  if (sesionGuardada) {
-
-    usuarioActivo = JSON.parse(sesionGuardada);
-
-    activarSistema();
-  }
-
+  mostrarLoader(false);
   cargarDatos();
 });
 
 /* =========================================================
-   CARGAR DATOS
+   CARGAR DATOS DESDE GOOGLE APPS SCRIPT
 ========================================================= */
 
 async function cargarDatos() {
-
+  mostrarLoader(true);
   try {
-
-    const loader =
-      document.getElementById("loader");
-
-    loader.style.display = "flex";
-
     const response = await fetch(URL);
 
     if (!response.ok) {
-      throw new Error("Error");
+      throw new Error("Error conexión de red");
     }
 
     const data = await response.json();
+    console.log("Datos recibidos:", data);
+
+    if (!data.ok) {
+      throw new Error(data.error);
+    }
 
     alumnos = data.alumnos || [];
-
     docentes = data.docentes || [];
-
     salidas = data.salidas || [];
-
     historial = data.historial || [];
 
-    cargarDocentes();
-
-    cargarFiltros();
-
-    render();
-
-    renderHistorial();
-
-    loader.style.display = "none";
+    // Inicializaciones aditivas de interfaz
+    poblarSelectDocentes();
+    poblarFiltros();
+    actualizarContadores();
+    
+    // Evalúa si se mantiene bloqueado o despliega la grilla de alumnos
+    evaluarEstadoPantalla();
 
   } catch (error) {
-
-    console.error(error);
-
-    document.getElementById("loader").innerHTML = `
-      <div style="
-        color:red;
-        font-size:20px;
-        text-align:center;
-      ">
-        ❌ Error de conexión
-      </div>
-    `;
+    console.error("Error en cargarDatos:", error);
+    alert("ERROR DE RED: " + error.message + "\n\nVerifique que la Web App en Google Script esté publicada con acceso para 'Cualquiera' (Anyone).");
+  } finally {
+    mostrarLoader(false);
   }
 }
 
 /* =========================================================
-   LOGIN
+   SISTEMA DE CONTROL DE ACCESO (LOGIN Y CAPTURA)
 ========================================================= */
 
-async function verificarAcceso() {
-
-  if (procesando) return;
-
-  procesando = true;
-
-  const btn =
-    document.getElementById("btnLogin");
-
-  btn.disabled = true;
-
-  btn.classList.add("loading");
-
-  const nombre =
-    document.getElementById("docentes").value;
-
-  const pin =
-    document.getElementById("passDocente").value;
-
-  const user = docentes.find(
-    (d) =>
-      d.nombre === nombre &&
-      String(d.password) === String(pin)
-  );
-
-  await new Promise(r => setTimeout(r, 600));
-
-  if (user) {
-
-    usuarioActivo = user;
-
-    localStorage.setItem(
-      "sesionActiva",
-      JSON.stringify(user)
-    );
-
-    activarSistema();
-
-    showToast(
-      `✅ Bienvenido ${user.nombre}`
-    );
-
-  } else {
-
-    const input =
-      document.getElementById("passDocente");
-
-    input.classList.add("shake");
-
-    setTimeout(() => {
-      input.classList.remove("shake");
-    }, 500);
-
-    showToast(
-      "❌ PIN incorrecto",
-      "error"
-    );
-  }
-
-  btn.disabled = false;
-
-  btn.classList.remove("loading");
-
-  procesando = false;
-}
-
-/* =========================================================
-   ACTIVAR SISTEMA
-========================================================= */
-
-function activarSistema() {
-
-  document.querySelector(
-    ".grupo-sesion"
-  ).style.display = "none";
-
-  [
-    "logoutBtn",
-    "seccion-filtros",
-    "contador-container",
-    "buscador-box",
-    "historial-container",
-    "changePassBtn"
-  ].forEach((id) => {
-
-    const el = document.getElementById(id);
-
-    if (el) {
-      el.style.display = "block";
+function poblarSelectDocentes() {
+  const select = document.getElementById("docentes");
+  if (!select) return;
+  
+  select.innerHTML = '<option value="">Seleccione Usuario...</option>';
+  
+  docentes.forEach(d => {
+    const nombreDocente = d.nombre || d.usuario || d.docente;
+    if (nombreDocente) {
+      const opt = document.createElement("option");
+      opt.value = String(nombreDocente).trim();
+      opt.textContent = String(nombreDocente).trim();
+      select.appendChild(opt);
     }
   });
-
-  // ROL
-  const rolBox =
-    document.getElementById("rolActivo");
-
-  if (rolBox) {
-
-    rolBox.innerHTML =
-      `👤 ${usuarioActivo.nombre}
-       (${usuarioActivo.rol || "Docente"})`;
-  }
-
-  render();
 }
 
-/* =========================================================
-   RENDER
-========================================================= */
+function verificarAcceso() {
+  const select = document.getElementById("docentes");
+  const inputPass = document.getElementById("passDocente");
 
-function render() {
+  if (!select || !inputPass) return;
 
-  const grid =
-    document.getElementById("grid");
+  const usuarioSel = select.value;
+  const pinIngresado = inputPass.value.trim();
 
-  if (!grid) return;
-
-  const curso =
-    document.getElementById("fCurso").value;
-
-  const busqueda =
-    document.getElementById("buscador")
-      .value
-      .toLowerCase();
-
-  if (!curso) {
-
-    grid.innerHTML = `
-      <div class="panel"
-           style="text-align:center">
-        📚 Seleccione curso
-      </div>
-    `;
-
+  if (!usuarioSel || !pinIngresado) {
+    alert("Por favor, seleccione su usuario e ingrese el PIN.");
+    inputPass.classList.add("shake");
+    setTimeout(() => inputPass.classList.remove("shake"), 400);
     return;
   }
 
-  const filtrados = alumnos.filter((a) => {
+  // Validación cruzada contra la hoja DOCENTES
+  const docente = docentes.find(d => (d.nombre === usuarioSel || d.usuario === usuarioSel));
+  const pinCorrecto = docente ? String(docente.pin || docente.password || '').trim() : '';
 
-    return (
-      a.curso == curso &&
-      (
-        a.nombre.toLowerCase()
-          .includes(busqueda) ||
-        String(a.dni)
-          .includes(busqueda)
-      )
-    );
+  if (docente && pinCorrecto === pinIngresado) {
+    usuarioActivo = docente;
+    
+    evaluarEstadoPantalla();
+    
+    const rBox = document.getElementById("rolActivo");
+    if (rBox) {
+      rBox.textContent = `👤 ${usuarioActivo.nombre} (${String(usuarioActivo.rol || 'Preceptor').toUpperCase()})`;
+    }
+  } else {
+    alert("PIN de acceso incorrecto.");
+    inputPass.value = "";
+    inputPass.classList.add("shake");
+    setTimeout(() => inputPass.classList.remove("shake"), 400);
+  }
+}
+
+function evaluarEstadoPantalla() {
+  const panelLogin = document.querySelector(".grupo-sesion");
+  const seccionFiltros = document.getElementById("seccion-filtros");
+  const contadorContainer = document.getElementById("contador-container");
+  const buscadorBox = document.getElementById("buscador-box");
+  const logoutBtn = document.getElementById("logoutBtn");
+  const changePassBtn = document.getElementById("changePassBtn");
+  const grid = document.getElementById("grid");
+
+  if (!usuarioActivo) {
+    // Si no hay sesión, se oculta todo el panel operativo por seguridad
+    if (panelLogin) panelLogin.style.display = "block";
+    if (seccionFiltros) seccionFiltros.style.display = "none";
+    if (contadorContainer) contadorContainer.style.display = "none";
+    if (buscadorBox) buscadorBox.style.display = "none";
+    if (logoutBtn) logoutBtn.style.display = "none";
+    if (changePassBtn) changePassBtn.style.display = "none";
+    if (grid) grid.innerHTML = `<div style="text-align:center; width:100%; color:var(--muted); padding:40px; font-weight:700;">Debe seleccionar usuario e ingresar su PIN para acceder al control de alumnos.</div>`;
+  } else {
+    // Si hay sesión activa, habilitamos el software de gestión
+    if (panelLogin) panelLogin.style.display = "none";
+    if (seccionFiltros) seccionFiltros.style.display = "block";
+    if (contadorContainer) contadorContainer.style.display = "block";
+    if (buscadorBox) buscadorBox.style.display = "block";
+    if (logoutBtn) logoutBtn.style.display = "block";
+    if (changePassBtn) changePassBtn.style.display = "block";
+    
+    render();
+    renderHistorial();
+  }
+}
+
+function cerrarSesion() {
+  usuarioActivo = null;
+  const inputPass = document.getElementById("passDocente");
+  if (inputPass) inputPass.value = "";
+  const selectDoc = document.getElementById("docentes");
+  if (selectDoc) selectDoc.value = "";
+  
+  const rBox = document.getElementById("rolActivo");
+  if (rBox) rBox.textContent = "";
+
+  evaluarEstadoPantalla();
+}
+
+/* =========================================================
+   POBLAR FILTROS DINÁMICOS EN CASCADA
+========================================================= */
+
+function poblarFiltros() {
+  const fCurso = document.getElementById("fCurso");
+  const fDivision = document.getElementById("fDivision");
+  const fTurno = document.getElementById("fTurno");
+  const fEspecialidad = document.getElementById("fEspecialidad");
+
+  if (!fCurso || !fDivision || !fTurno || !fEspecialidad) return;
+
+  const cursos = ["-- CURSO --", ...new Set(alumnos.map(a => a.curso).filter(Boolean))];
+  const divisiones = ["-- DIVISIÓN --", ...new Set(alumnos.map(a => a.division || a.div).filter(Boolean))];
+  const turnos = ["-- TURNO --", ...new Set(alumnos.map(a => a.turno).filter(Boolean))];
+  const especialidades = ["-- ESPECIALIDAD --", ...new Set(alumnos.map(a => a.especialidad || a.esp).filter(Boolean))];
+
+  llenarSelectOptions(fCurso, cursos);
+  llenarSelectOptions(fDivision, divisiones);
+  llenarSelectOptions(fTurno, turnos);
+  llenarSelectOptions(fEspecialidad, especialidades);
+
+  [fCurso, fDivision, fTurno, fEspecialidad].forEach(elem => {
+    elem.removeEventListener("change", render);
+    elem.addEventListener("change", render);
   });
+}
 
-  actualizarContadores(filtrados);
+function llenarSelectOptions(elemento, lista) {
+  elemento.innerHTML = "";
+  lista.forEach(val => {
+    const opt = document.createElement("option");
+    opt.value = val.includes("--") ? "" : val;
+    opt.textContent = val;
+    elemento.appendChild(opt);
+  });
+}
 
+/* =========================================================
+   ACTUALIZAR CONTADORES ESTADÍSTICOS
+========================================================= */
+
+function actualizarContadores() {
+  const total = alumnos.length;
+  const ausentes = alumnos.filter(a => String(a.estado).toUpperCase() === "AUSENTE").length;
+  const afuera = salidas.length;
+  const enAula = total - ausentes - afuera;
+
+  const eTotal = document.getElementById("total-alumnos");
+  const eAula = document.getElementById("en-aula");
+  const eAfuera = document.getElementById("afuera");
+  const eAusente = document.getElementById("ausentes");
+
+  if (eTotal) eTotal.textContent = total;
+  if (eAula) eAula.textContent = enAula < 0 ? 0 : enAula;
+  if (eAfuera) eAfuera.textContent = afuera;
+  if (eAusente) eAusente.textContent = ausentes;
+}
+
+/* =========================================================
+   RENDER DE TARJETAS (GRIDS Y ESTADOS FILTRADOS)
+========================================================= */
+
+function render() {
+  const grid = document.getElementById("grid");
+  if (!grid) return;
   grid.innerHTML = "";
 
-  const fragment =
-    document.createDocumentFragment();
+  // Retorno seguro si no hay login
+  if (!usuarioActivo) return;
 
-  filtrados.forEach((a) => {
+  const busqueda = document.getElementById("buscador")?.value.toLowerCase() || "";
+  const cursoSel = document.getElementById("fCurso")?.value || "";
+  const divSel = document.getElementById("fDivision")?.value || "";
+  const turnoSel = document.getElementById("fTurno")?.value || "";
+  const espSel = document.getElementById("fEspecialidad")?.value || "";
 
-    const reg = salidas.find(
-      (s) =>
-        s.dni == a.dni &&
-        !s.regreso
-    );
+  // Filtrado paramétrico simultáneo
+  const alumnosFiltrados = alumnos.filter(a => {
+    const nomA = String(a.nombre || '').toLowerCase();
+    const dniA = String(a.dni || '');
+    const curA = String(a.curso || '');
+    const divA = String(a.division || a.div || '');
+    const turA = String(a.turno || '');
+    const espA = String(a.especialidad || a.esp || '');
 
-    const div =
-      document.createElement("div");
+    const cumpleBuscador = nomA.includes(busqueda) || dniA.includes(busqueda);
+    const cumpleCurso = !cursoSel || curA === cursoSel;
+    const cumpleDiv = !divSel || divA === divSel;
+    const cumpleTurno = !turnoSel || turA === turnoSel;
+    const cumpleEsp = !espSel || espA === espSel;
 
-    div.id = `card-${a.dni}`;
+    return cumpleBuscador && cumpleCurso && cumpleDiv && cumpleTurno && cumpleEsp;
+  });
 
-    // ESTADO
-    let estado = "in";
+  if (alumnosFiltrados.length === 0) {
+    grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--muted); padding: 20px; font-weight:700;">No hay alumnos matriculados que coincidan con la selección actual.</div>`;
+    return;
+  }
+
+  alumnosFiltrados.forEach((a) => {
+    const reg = salidas.find((s) => {
+      return (
+        String(s.dni).trim() === String(a.dni).trim() &&
+        (
+          !s.regreso ||
+          s.regreso === "" ||
+          String(s.estado).toUpperCase() === "AFUERA"
+        )
+      );
+    });
+
+    const div = document.createElement("div");
+    div.className = "alumno";
+
+    let html = `<h3>${a.nombre}</h3>`;
 
     if (a.estado === "AUSENTE") {
-      estado = "ausente";
+      div.classList.add("ausente");
+      html += `<div>❌ AUSENTE</div>`;
     }
-
-    else if (
-      a.estado === "TARDE"
-    ) {
-      estado = "tarde";
-    }
-
-    else if (reg) {
-      estado = "out";
-    }
-
-    div.className =
-      `alumno ${estado}`;
-
-    let html = `
-      <span class="nombre">
-        ${a.nombre}
-      </span>
-    `;
-
-    // =====================
-    // AUSENTE
-    // =====================
-
-    if (a.estado === "AUSENTE") {
-
-      html += `
-        <div class="label-ausente">
-          ❌ AUSENTE
-        </div>
-      `;
-    }
-
-    // =====================
-    // TARDE
-    // =====================
-
     else if (a.estado === "TARDE") {
-
-      html += `
-        <div class="motivo-destacado">
-          ⏰ LLEGADA TARDE
-        </div>
-      `;
+      div.classList.add("tarde");
+      html += `<div>⏰ TARDE</div>`;
     }
-
-    // =====================
-    // AFUERA
-    // =====================
-
+    else if (a.estado === "RETIRO") {
+      div.classList.add("retiro");
+      html += `<div>👨‍👩‍👦 RETIRADO</div>`;
+    }
     else if (reg) {
-
+      div.classList.add("out");
       html += `
-        <div class="motivo-destacado">
-          🚪 ${reg.causa.toUpperCase()}
-        </div>
+        <div class="motivo-destacado">🚪 ${reg.causa || "Salida"}</div>
+        <div class="timer-box" id="timer-${a.dni}">⏱️ 00:00</div>
+        <button class="btn-main" style="width:100%; margin-top:10px;" onclick="registrarRegreso('${a.dni}')">
+          REGRESO
+        </button>
       `;
-
-      if (
-        reg.causa.toLowerCase() === "baño"
-      ) {
-
-        html += `
-          <div class="timer-box">
-            ⏳
-            <span id="timer-${a.dni}">
-              15:00
-            </span>
-          </div>
-        `;
-
-        iniciarCronometro(
-          a.dni,
-          reg.inicioTime
-        );
-      }
+      // Lanza cronómetro con parsing ISO limpio
+      iniciarCronometro(a.dni, reg.timestamp || reg.fecha || reg.salida);
     }
-
-    // =====================
-    // EN AULA
-    // =====================
-
     else {
-
+      div.classList.add("in");
       html += `
-        <div class="estado-aula">
-          ✅ EN AULA
-        </div>
-      `;
-    }
-
-    // =====================
-    // BOTONES PRECEPTOR
-    // =====================
-
-    if (
-      usuarioActivo &&
-      usuarioActivo.rol === "Preceptor"
-    ) {
-
-      html += `
-        <div class="acciones-preceptor">
-
-          <button
-            class="btn-mini rojo"
-            onclick="marcarAusente('${a.dni}')">
-
-            AUS
-
-          </button>
-
-          <button
-            class="btn-mini naranja"
-            onclick="marcarTarde('${a.dni}')">
-
-            TARDE
-
-          </button>
-
-          <button
-            class="btn-mini azul"
-            onclick="retiroTutor('${a.dni}')">
-
-            RETIRO
-
-          </button>
-
-        </div>
+        <button class="btn-main" style="width:100%; margin-top:10px;" onclick="registrarSalida('${a.dni}')">
+          SALIDA
+        </button>
       `;
     }
 
     div.innerHTML = html;
-
-    // CLICK NORMAL
-    if (a.estado !== "AUSENTE") {
-
-      div.onclick = (e) => {
-
-        if (
-          e.target.tagName !== "BUTTON"
-        ) {
-
-          procesarAccion(
-            a,
-            reg,
-            div
-          );
-        }
-      };
-    }
-
-    fragment.appendChild(div);
+    grid.appendChild(div);
   });
-
-  grid.appendChild(fragment);
 }
 
 /* =========================================================
-   PROCESAR ACCIÓN
+   REGISTRAR SALIDA (ENLACE ESTRICTO INTERFAZ-HOJA DE REQUISITOS)
 ========================================================= */
 
-async function procesarAccion(
-  alumno,
-  registro,
-  elemento
-) {
+async function registrarSalida(dni) {
+  if (procesando || !usuarioActivo) return;
 
-  if (procesando) return;
+  const alumno = alumnos.find(a => String(a.dni).trim() === String(dni).trim());
+  if (!alumno) return;
 
-  const causa =
-    document.getElementById("causa")
-      .value;
+  // Lectura directa del selector superior (Reemplazo definitivo del prompt)
+  const causaSelect = document.getElementById("causa");
+  const causa = causaSelect ? causaSelect.value : "";
 
-  if (!registro && !causa) {
-
-    showToast(
-      "📍 Seleccione destino",
-      "error"
-    );
-
+  if (!causa) {
+    alert("Debe seleccionar un 'DESTINO REQUERIDO' de la lista superior antes de autorizar la salida.");
+    if (causaSelect) causaSelect.focus();
     return;
   }
 
   procesando = true;
-
-  elemento.classList.add("loading");
-
-  const data = {
-
-    dni: alumno.dni,
-
-    nombre: alumno.nombre,
-
-    docente: usuarioActivo.nombre,
-
-    tipo: registro
-      ? "regreso"
-      : "salida",
-
-    causa: registro
-      ? ""
-      : causa,
-
-    tipoAccion: "movimiento"
-  };
+  mostrarLoader(true);
 
   try {
-
-    await fetch(URL, {
-
+    const response = await fetch(URL, {
       method: "POST",
-
-      body: JSON.stringify(data)
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tipoAccion: "movimiento",
+        tipo: "salida",
+        dni: String(alumno.dni).trim(),
+        nombre: alumno.nombre,
+        // Inyección de columnas estructurales mapeadas de tu Sheets
+        curso: alumno.curso || "",
+        division: alumno.division || alumno.div || "",
+        turno: alumno.turno || "",
+        especialidad: alumno.especialidad || alumno.esp || "",
+        docente: usuarioActivo.nombre, 
+        causa: causa
+      })
     });
 
-    // HISTORIAL
-    agregarHistorial(
-      alumno.nombre,
-      registro
-        ? "REGRESO"
-        : causa,
-      usuarioActivo.nombre
-    );
+    const result = await response.json();
+    console.log("Salida confirmada:", result);
 
-    // REGRESO
-    if (registro) {
+    if (!result.ok) throw new Error(result.error);
 
-      clearInterval(
-        timers[alumno.dni]
-      );
-
-      delete timers[alumno.dni];
-
-      salidas = salidas.filter(
-        (s) =>
-          s.dni != alumno.dni
-      );
-
-      showToast(
-        "✅ Regreso registrado"
-      );
-    }
-
-    // SALIDA
-    else {
-
-      salidas.push({
-
-        dni: alumno.dni,
-
-        causa,
-
-        inicioTime: new Date()
-      });
-
-      showToast(
-        "🚪 Salida registrada"
-      );
-    }
-
-    render();
+    // Limpia la causa seleccionada para el próximo alumno
+    if (causaSelect) causaSelect.value = "";
+    await cargarDatos();
 
   } catch (error) {
-
     console.error(error);
-
-    showToast(
-      "❌ Error",
-      "error"
-    );
+    alert("No se pudo registrar la salida: " + error.message);
+  } finally {
+    procesando = false;
+    mostrarLoader(false);
   }
-
-  procesando = false;
 }
 
 /* =========================================================
-   PRECEPTOR
+   REGISTRAR REGRESO
 ========================================================= */
 
-function marcarAusente(dni) {
+async function registrarRegreso(dni) {
+  if (procesando || !usuarioActivo) return;
 
-  const alumno =
-    alumnos.find((a) => a.dni == dni);
-
+  const alumno = alumnos.find(a => String(a.dni).trim() === String(dni).trim());
   if (!alumno) return;
 
-  alumno.estado = "AUSENTE";
+  procesando = true;
+  mostrarLoader(true);
 
-  agregarHistorial(
-    alumno.nombre,
-    "AUSENTE",
-    usuarioActivo.nombre
-  );
-
-  render();
-
-  showToast("❌ Ausente");
-}
-
-function marcarTarde(dni) {
-
-  const alumno =
-    alumnos.find((a) => a.dni == dni);
-
-  if (!alumno) return;
-
-  alumno.estado = "TARDE";
-
-  agregarHistorial(
-    alumno.nombre,
-    "LLEGADA TARDE",
-    usuarioActivo.nombre
-  );
-
-  render();
-
-  showToast("⏰ Llegada tarde");
-}
-
-function retiroTutor(dni) {
-
-  const alumno =
-    alumnos.find((a) => a.dni == dni);
-
-  if (!alumno) return;
-
-  alumno.estado = "RETIRO";
-
-  agregarHistorial(
-    alumno.nombre,
-    "RETIRO PADRE/TUTOR",
-    usuarioActivo.nombre
-  );
-
-  render();
-
-  showToast("👨‍👩‍👦 Retiro");
-}
-
-/* =========================================================
-   HISTORIAL
-========================================================= */
-
-function agregarHistorial(
-  alumno,
-  accion,
-  usuario
-) {
-
-  historial.unshift({
-
-    alumno,
-
-    accion,
-
-    usuario,
-
-    hora:
-      new Date()
-        .toLocaleTimeString()
-  });
-
-  renderHistorial();
-}
-
-function renderHistorial() {
-
-  const box =
-    document.getElementById("historial");
-
-  if (!box) return;
-
-  box.innerHTML = "";
-
-  historial
-    .slice(0, 30)
-    .forEach((h) => {
-
-      box.innerHTML += `
-        <div class="historial-item">
-
-          <strong>
-            ${h.alumno}
-          </strong>
-
-          - ${h.accion}
-
-          <br>
-
-          👤 ${h.usuario}
-
-          • 🕒 ${h.hora}
-
-        </div>
-      `;
+  try {
+    const response = await fetch(URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tipoAccion: "movimiento",
+        tipo: "regreso",
+        dni: String(alumno.dni).trim(),
+        nombre: alumno.nombre,
+        curso: alumno.curso || "",
+        division: alumno.division || alumno.div || "",
+        turno: alumno.turno || "",
+        especialidad: alumno.especialidad || alumno.esp || "",
+        docente: usuarioActivo.nombre
+      })
     });
-}
 
-function limpiarHistorial() {
+    const result = await response.json();
+    console.log("Regreso confirmado:", result);
 
-  historial = [];
+    if (!result.ok) throw new Error(result.error);
 
-  renderHistorial();
+    // Destrucción limpia del intervalo en ejecución
+    if (timers[dni]) {
+      clearInterval(timers[dni]);
+      delete timers[dni];
+    }
 
-  showToast("🗑 Historial limpio");
+    await cargarDatos();
+
+  } catch (error) {
+    console.error(error);
+    alert("No se pudo registrar el regreso: " + error.message);
+  } finally {
+    procesando = false;
+    mostrarLoader(false);
+  }
 }
 
 /* =========================================================
-   CAMBIAR CONTRASEÑA
+   CRONÓMETRO DE PRECISIÓN Y CONTROL DE ALERTAS VISUALES
 ========================================================= */
 
-function cambiarPassword() {
-
-  const actual =
-    prompt("Contraseña actual");
-
-  if (
-    String(actual) !==
-    String(usuarioActivo.password)
-  ) {
-
-    showToast(
-      "❌ Contraseña incorrecta",
-      "error"
-    );
-
-    return;
-  }
-
-  const nueva =
-    prompt("Nueva contraseña");
-
-  if (!nueva || nueva.length < 4) {
-
-    showToast(
-      "⚠ Mínimo 4 caracteres",
-      "error"
-    );
-
-    return;
-  }
-
-  usuarioActivo.password = nueva;
-
-  localStorage.setItem(
-    "sesionActiva",
-    JSON.stringify(usuarioActivo)
-  );
-
-  showToast(
-    "🔐 Contraseña cambiada"
-  );
-}
-
-/* =========================================================
-   CRONÓMETRO
-========================================================= */
-
-function iniciarCronometro(
-  dni,
-  inicio
-) {
-
+function iniciarCronometro(dni, inicioIso) {
   if (timers[dni]) {
-
-    clearInterval(
-      timers[dni]
-    );
+    clearInterval(timers[dni]);
   }
 
-  const LIMITE = 15 * 60;
+  const inicio = inicioIso ? new Date(inicioIso) : new Date();
 
   timers[dni] = setInterval(() => {
+    const ahora = new Date();
+    const diferenciaMs = ahora - inicio;
+    if (diferenciaMs < 0 || isNaN(diferenciaMs)) return;
 
-    const restante =
-      LIMITE -
-      Math.floor(
-        (
-          Date.now() -
-          new Date(inicio)
-            .getTime()
-        ) / 1000
-      );
+    const totalSegundos = Math.floor(diferenciaMs / 1000);
+    const minutos = Math.floor(totalSegundos / 60);
+    const segundos = totalSegundos % 60;
 
-    const display =
-      document.getElementById(
-        `timer-${dni}`
-      );
-
-    const card =
-      document.getElementById(
-        `card-${dni}`
-      );
-
-    if (!display || !card) {
-
-      clearInterval(
-        timers[dni]
-      );
-
-      return;
+    const displayEl = document.getElementById(`timer-${dni}`);
+    if (displayEl) {
+      displayEl.textContent = `⏱️ ${String(minutos).padStart(2, '0')}:${String(segundos).padStart(2, '0')}`;
+      
+      const card = displayEl.closest(".alumno");
+      
+      // Conexión activa con las reglas críticas de style.css
+      if (minutos >= 15) {
+        card?.classList.remove("tiempo-critico");
+        card?.classList.add("tiempo-agotado");
+        
+        // Ejecuta el zumbador de alertSound únicamente en el segundo cero
+        const audio = document.getElementById("alertSound");
+        if (audio && segundos === 0) audio.play().catch(() => {});
+      } else if (minutos >= 13) {
+        card?.classList.add("tiempo-critico");
+      }
+    } else {
+      clearInterval(timers[dni]);
     }
-
-    if (restante <= 0) {
-
-      display.innerText =
-        "⛔ TIEMPO";
-
-      card.classList.add(
-        "tiempo-agotado"
-      );
-
-      return;
-    }
-
-    const m =
-      Math.floor(restante / 60);
-
-    const s =
-      restante % 60;
-
-    display.innerText =
-      `${m}:${s < 10 ? "0" : ""}${s}`;
-
   }, 1000);
 }
 
 /* =========================================================
-   CONTADORES
+   FUNCIONES DE INTERFAZ COMPLEMENTARIAS REQUERIDAS
 ========================================================= */
 
-function actualizarContadores(
-  filtrados
-) {
+function renderHistorial() {
+  const box = document.getElementById("historial");
+  const contenedorHistorial = document.getElementById("historial-container");
+  if (!box) return;
+  
+  if (contenedorHistorial) contenedorHistorial.style.display = "block";
+  box.innerHTML = "";
 
-  const total =
-    filtrados.length;
+  const ultimos = historial.slice(-10).reverse();
+  if (ultimos.length === 0) {
+    box.innerHTML = `<p style="color:var(--muted); padding:10px; font-size:14px;">Sin movimientos registrados hoy en la planilla.</p>`;
+    return;
+  }
 
-  const ausentes =
-    filtrados.filter(
-      (a) =>
-        a.estado === "AUSENTE"
-    ).length;
-
-  const afuera =
-    filtrados.filter(
-      (a) =>
-        salidas.find(
-          (s) =>
-            s.dni == a.dni
-        )
-    ).length;
-
-  document.getElementById(
-    "total-alumnos"
-  ).innerText = total;
-
-  document.getElementById(
-    "en-aula"
-  ).innerText =
-    total - ausentes - afuera;
-
-  document.getElementById(
-    "afuera"
-  ).innerText = afuera;
-
-  document.getElementById(
-    "ausentes"
-  ).innerText = ausentes;
-}
-
-/* =========================================================
-   DOCENTES
-========================================================= */
-
-function cargarDocentes() {
-
-  const select =
-    document.getElementById(
-      "docentes"
-    );
-
-  select.innerHTML =
-    `<option value="">
-      Seleccione Usuario...
-    </option>`;
-
-  docentes.forEach((d) => {
-
-    select.innerHTML += `
-      <option value="${d.nombre}">
-        ${d.nombre}
-        (${d.rol || "Docente"})
-      </option>
-    `;
+  ultimos.forEach(h => {
+    const div = document.createElement("div");
+    div.className = "historial-item";
+    div.innerHTML = `⏳ <strong>${h.hora || h.timestamp || ''}</strong> - ${h.nombre || h.alumno || 'Alumno'} (${h.movimiento || h.tipo || ''}) -> <em>Destino: ${h.destino || h.causa || '-'}</em>`;
+    box.appendChild(div);
   });
 }
 
-/* =========================================================
-   FILTROS
-========================================================= */
-
-function cargarFiltros() {
-
-  [
-    "fCurso",
-    "fDivision",
-    "fTurno",
-    "fEspecialidad"
-  ].forEach((id) => {
-
-    const key =
-      id.replace("f", "")
-        .toLowerCase();
-
-    const select =
-      document.getElementById(id);
-
-    select.innerHTML =
-      `<option value="">
-        ${key.toUpperCase()}
-      </option>`;
-
-    [
-      ...new Set(
-        alumnos.map(
-          (a) => a[key]
-        )
-      )
-    ]
-    .sort()
-    .forEach((v) => {
-
-      if (v) {
-
-        select.innerHTML += `
-          <option value="${v}">
-            ${v}
-          </option>
-        `;
-      }
-    });
-
-    select.onchange = render;
-  });
+function mostrarLoader(abrir) {
+  const el = document.getElementById("loader");
+  if (el) el.style.display = abrir ? "flex" : "none";
 }
-
-/* =========================================================
-   TOAST
-========================================================= */
-
-function showToast(
-  mensaje,
-  tipo = "success"
-) {
-
-  const container =
-    document.getElementById(
-      "toast-container"
-    );
-
-  const toast =
-    document.createElement("div");
-
-  toast.className =
-    `toast ${
-      tipo === "error"
-        ? "error"
-        : ""
-    }`;
-
-  toast.innerText = mensaje;
-
-  container.appendChild(toast);
-
-  setTimeout(() => {
-
-    toast.classList.add("hide");
-
-    setTimeout(() => {
-
-      toast.remove();
-
-    }, 400);
-
-  }, 2500);
-}
-
-/* =========================================================
-   THEME
-========================================================= */
 
 function toggleTheme() {
-
-  document.body.classList.toggle(
-    "light-mode"
-  );
-
-  const claro =
-    document.body.classList.contains(
-      "light-mode"
-    );
-
-  localStorage.setItem(
-    "modoTema",
-    claro
-      ? "claro"
-      : "oscuro"
-  );
-
-  document.getElementById(
-    "themeToggle"
-  ).innerHTML =
-    claro
-      ? "☀️"
-      : "🌙";
+  document.body.classList.toggle("light-mode");
+  const btn = document.getElementById("themeToggle");
+  if (btn) btn.textContent = document.body.classList.contains("light-mode") ? "🌙" : "☀️";
 }
 
-/* =========================================================
-   LOGOUT
-========================================================= */
-
-function cerrarSesion() {
-
-  Object.keys(timers)
-    .forEach((k) => {
-
-      clearInterval(
-        timers[k]
-      );
-    });
-
-  timers = {};
-
-  usuarioActivo = null;
-
-  localStorage.removeItem(
-    "sesionActiva"
-  );
-
-  showToast(
-    "👋 Sesión cerrada"
-  );
-
-  setTimeout(() => {
-
-    location.reload();
-
-  }, 700);
-}
+function cambiarPassword() { alert("Configuración de claves disponible en la administración de Google Sheets."); }
+function limpiarHistorial() { alert("Para purgar el historial limpie las filas desde la hoja HISTORIAL de Google."); }
+function exportHistorialPDF() { window.print(); }
