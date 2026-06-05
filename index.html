@@ -1,175 +1,195 @@
-
 <!DOCTYPE html>
 <html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GESTIÓN SALIDAS | IPEM 146</title>
 
-    <!-- GOOGLE FONTS -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
-  
-    
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GESTIÓN SALIDAS | IPEM 146</title>
+
+  <!-- GOOGLE FONTS -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+
+
 </head>
+
 <body>
 
-    <!-- LOADER -->
-    <div id="loader">
-        <div class="spinner"></div>
-        <p id="loader-text">Cargando sistema...</p>
+  <!-- LOADER -->
+  <div id="loader">
+    <div class="spinner"></div>
+    <p id="loader-text">Cargando sistema...</p>
+  </div>
+
+  <!-- TOAST CONTAINER -->
+  <div id="toast-container"></div>
+
+  <!-- MODAL DE CONFIRMACIÓN PERSONALIZADO -->
+  <div id="custom-confirm-modal" class="custom-modal" style="display:none;">
+    <div class="custom-modal-content">
+      <h3 id="confirm-modal-title">Confirmación</h3>
+      <p id="confirm-modal-message">¿Estás seguro de realizar esta acción?</p>
+      <div class="custom-modal-buttons">
+        <button id="confirm-modal-btn-no" class="btn-mini naranja">Cancelar</button>
+        <button id="confirm-modal-btn-yes" class="btn-mini azul">Confirmar</button>
+      </div>
     </div>
+  </div>
 
-    <!-- TOAST CONTAINER -->
-    <div id="toast-container"></div>
-
-    <!-- MODAL DE CONFIRMACIÓN PERSONALIZADO -->
-    <div id="custom-confirm-modal" class="custom-modal" style="display:none;">
-        <div class="custom-modal-content">
-            <h3 id="confirm-modal-title">Confirmación</h3>
-            <p id="confirm-modal-message">¿Estás seguro de realizar esta acción?</p>
-            <div class="custom-modal-buttons">
-                <button id="confirm-modal-btn-no" class="btn-mini naranja">Cancelar</button>
-                <button id="confirm-modal-btn-yes" class="btn-mini azul">Confirmar</button>
-            </div>
+            🌙
+          </button>
+          <!-- LOGOUT -->
+          <button id="logoutBtn" class="logout-btn" onclick="cerrarSesion()" style="display:none;"
+            title="Cerrar sesión">
+            🚪
+          </button>
         </div>
-    </div>
+      </div>
+      <div class="header-meta">
+        <div id="last-updated" class="last-updated">Última actualización: --</div>
+        <div id="refresh-status" class="refresh-status hidden">
+          <span class="refresh-dot"></span>
+          Actualizando datos...
+        </div>
+      </div>
+    </header>
 
-    <!-- APP CONTAINER -->
-    <div class="container">
+    <!-- ALERTA DE CONFIGURACIÓN CORS -->
+    <section id="cors-helper-panel" class="panel"
+      style="display: none; border-left: 6px solid var(--red); background: rgba(239, 68, 68, 0.05);">
+      <h3 style="color: var(--red); margin-bottom: 10px;">⚠️ Error de conexión con Google Sheets</h3>
+      <p style="font-size: 14px; margin-bottom: 12px; line-height: 1.5; color: var(--text);">
+        El navegador bloqueó la conexión debido a restricciones de seguridad (CORS / Bloqueo de Red).
+        Esto suele ocurrir si el Web App de Google Sheets no está publicado correctamente para acceso público.
+      </p>
+      <h4 style="font-size: 13px; margin-bottom: 6px; color: var(--accent);">Para solucionarlo en tu Google Sheets:</h4>
+      <ol style="font-size: 13px; margin-left: 20px; line-height: 1.6; color: var(--muted); margin-bottom: 15px;">
+        <li>Abre el script en tu Google Sheet (Extensiones > Apps Script).</li>
+        <li>Haz clic arriba en el botón azul <strong>Implementar (Deploy)</strong> > <strong>Nueva
+            implementación</strong>.</li>
+        <li>Selecciona tipo <strong>"Aplicación web"</strong> (Web App).</li>
+        <li>En <em>"Ejecutar como"</em> elige: <strong>"Yo" (Tu correo electrónico)</strong>.</li>
+        <li>En <em>"Quién tiene acceso"</em> elige **OBLIGATORIAMENTE**: <strong>"Cualquiera" (Anyone)</strong>.</li>
+        <li>Haz clic en Implementar, otorga todos los permisos de Google que te pida y copia el nuevo enlace provisto
+          para reemplazarlo en la variable <code>URL</code> de la aplicación.</li>
+      </ol>
+      <button class="btn-main" onclick="cargarDatos()" style="padding: 10px 18px; font-size: 12px;">🔄 Reintentar
+        Conexión</button>
+    </section>
 
-        <!-- HEADER -->
-        <header>
-            <div class="header-top">
-                <div class="titulo-box">
-                    <h1>📊 GESTIÓN SALIDAS</h1>
-                    <span>IPEM 146 "CENTENARIO"</span>
-                </div>
+    <!-- LOGIN -->
+    <section id="seccion-login" class="panel grupo-sesion">
+      <h3>🔑 ACCESO AL PERSONAL</h3>
+      <div class="controles">
+        <select id="docentes">
+          <option value="">Cargando personal...</option>
+        </select>
 
-                <div id="rolActivo" class="rol-box" style="display:none;">
-                    👤 Preceptor Activo
-                </div>
+        <div class="pin-input-wrapper">
+          <input type="password" id="passDocente" placeholder="PIN de Seguridad" autocomplete="off">
+          <button type="button" class="btn-toggle-pin" onclick="toggleMostrarPin()" title="Mostrar/Ocultar PIN">👁️</button>
+        </div>
 
-                <div class="header-buttons">
-                    <!-- TEMA -->
-                    <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
-                        🌙
-                    </button>
-                    <!-- LOGOUT -->
-                    <button id="logoutBtn" class="logout-btn" onclick="cerrarSesion()" style="display:none;" title="Cerrar sesión">
-                        🚪
-                    </button>
-                </div>
-            </div>
-        </header>
+        <button id="btnLogin" class="btn-main" onclick="verificarAcceso()">
+          ENTRAR
+        </button>
+      </div>
+    </section>
 
-        <!-- ALERTA DE CONFIGURACIÓN CORS -->
-        <section id="cors-helper-panel" class="panel" style="display: none; border-left: 6px solid var(--red); background: rgba(239, 68, 68, 0.05);">
-            <h3 style="color: var(--red); margin-bottom: 10px;">⚠️ Error de conexión con Google Sheets</h3>
-            <p style="font-size: 14px; margin-bottom: 12px; line-height: 1.5; color: var(--text);">
-                El navegador bloqueó la conexión debido a restricciones de seguridad (CORS / Bloqueo de Red). 
-                Esto suele ocurrir si el Web App de Google Sheets no está publicado correctamente para acceso público.
-            </p>
-            <h4 style="font-size: 13px; margin-bottom: 6px; color: var(--accent);">Para solucionarlo en tu Google Sheets:</h4>
-            <ol style="font-size: 13px; margin-left: 20px; line-height: 1.6; color: var(--muted); margin-bottom: 15px;">
-                <li>Abre el script en tu Google Sheet (Extensiones > Apps Script).</li>
-                <li>Haz clic arriba en el botón azul <strong>Implementar (Deploy)</strong> > <strong>Nueva implementación</strong>.</li>
-                <li>Selecciona tipo <strong>"Aplicación web"</strong> (Web App).</li>
-                <li>En <em>"Ejecutar como"</em> elige: <strong>"Yo" (Tu correo electrónico)</strong>.</li>
-                <li>En <em>"Quién tiene acceso"</em> elige **OBLIGATORIAMENTE**: <strong>"Cualquiera" (Anyone)</strong>.</li>
-                <li>Haz clic en Implementar, otorga todos los permisos de Google que te pida y copia el nuevo enlace provisto para reemplazarlo en la variable <code>URL</code> de la aplicación.</li>
-            </ol>
-            <button class="btn-main" onclick="cargarDatos()" style="padding: 10px 18px; font-size: 12px;">🔄 Reintentar Conexión</button>
-        </section>
+    <!-- FILTROS (Solo visible logeado) -->
+    <section id="seccion-filtros" class="panel" style="display:none;">
+      <div class="filtros">
+        <select id="fCurso" onchange="render()">
+          <option value="">Todos los Cursos</option>
+        </select>
+        <select id="fDivision" onchange="render()">
+          <option value="">Todas las Divisiones</option>
+        </select>
+        <select id="fTurno" onchange="render()">
+          <option value="">Todos los Turnos</option>
+        </select>
+        <select id="fEspecialidad" onchange="render()">
+          <option value="">Todas las Especialidades</option>
+        </select>
+      </div>
 
-        <!-- LOGIN -->
-        <section id="seccion-login" class="panel grupo-sesion">
-            <h3>🔑 ACCESO AL PERSONAL</h3>
-            <div class="controles">
-                <select id="docentes">
-                    <option value="">Cargando personal...</option>
-                </select>
+      <!-- DESTINO -->
+      <div class="destino-container">
+        <label for="causa">📍 MOTIVO POR DEFECTO PARA SALIDAS</label>
+        <select id="causa" onchange="toggleCausaAdicional()">
+          <option value="Baño">Baño 🚻 (Límite 15 min)</option>
+          <option value="Recreo">Recreo ☀️</option>
+          <option value="Dirección">Dirección 🏫</option>
+          <option value="Preceptoría">Preceptoría 📁</option>
+          <option value="Biblioteca">Biblioteca 📚</option>
+          <option value="Enfermería">Enfermería 🏥</option>
+          <option value="Salida autorizada">Salida autorizada 📝</option>
+          <option value="Emergencia">Emergencia 🚨</option>
+          <option value="Otro">Otro</option>
+        </select>
+        <input id="causa-adicional" type="text" placeholder="Detalle adicional opcional (ej: permiso médico, autorización, motivo específico)" autocomplete="off" style="display:none; margin-top: 12px;" />
+      </div>
+      <div class="bulk-actions">
+        <button class="btn-main btn-secondary" onclick="marcarRecreoParaTodos()">Recreo para todos</button>
+        <button class="btn-main btn-secondary" onclick="marcarAulaParaTodos()">Aula para todos</button>
+      </div>
+    </section>
 
-                <input type="password" id="passDocente" placeholder="PIN de Seguridad" autocomplete="off">
+    <!-- CONTADORES -->
+    <section id="contador-container" style="display:none;">
+      <div class="contador-box">
+        <div class="contador-item total">
+          TOTAL <strong id="total-alumnos">0</strong>
+        </div>
+        <div class="contador-item aula">
+          EN AULA <strong id="en-aula">0</strong>
+        </div>
+        <div class="contador-item salida">
+          AFUERA <strong id="afuera">0</strong>
+        </div>
+        <div class="contador-item ausente">
+          AUSENTES <strong id="ausentes">0</strong>
+        </div>
+      </div>
+    </section>
 
-                <button id="btnLogin" class="btn-main" onclick="verificarAcceso()">
-                    ENTRAR
-                </button>
-            </div>
-        </section>
+    <!-- BUSCADOR -->
+    <section id="buscador-box" class="panel" style="display:none;">
+      <input type="text" id="buscador" placeholder="🔍 Buscar alumno por nombre o DNI..." autocomplete="off"
+        oninput="render()">
+    </section>
 
-        <!-- FILTROS (Solo visible logeado) -->
-        <section id="seccion-filtros" class="panel" style="display:none;">
-            <div class="filtros">
-                <select id="fCurso" onchange="render()"><option value="">Todos los Cursos</option></select>
-                <select id="fDivision" onchange="render()"><option value="">Todas las Divisiones</option></select>
-                <select id="fTurno" onchange="render()"><option value="">Todos los Turnos</option></select>
-                <select id="fEspecialidad" onchange="render()"><option value="">Todas las Especialidades</option></select>
-            </div>
+    <!-- GRID DE TARJETAS -->
+    <main id="grid"></main>
 
-            <!-- DESTINO -->
-            <div class="destino-container">
-                <label for="causa">📍 DESTINO POR DEFECTO PARA SALIDAS</label>
-                <select id="causa">
-                    <option value="Baño">Baño 🚻 (Límite 15 min)</option>
-                    <option value="Dirección">Dirección 🏫</option>
-                    <option value="Preceptoría">Preceptoría 📁</option>
-                    <option value="Biblioteca">Biblioteca 📚</option>
-                </select>
-            </div>
-        </section>
+    <!-- HISTORIAL -->
+    <section id="historial-container" class="panel" style="display:none;">
+      <div class="historial-top">
+        <h2>📋 MOVIMIENTOS RECIENTES</h2>
+        <div style="display: flex; gap: 8px;">
+          <button class="theme-toggle" onclick="exportHistorialPDF()" title="Exportar Historial">
+            📄
+          </button>
+          <button class="logout-btn" onclick="limpiarHistorialView()" title="Limpiar pantalla"
+            style="background:#475569;">
+            🧹
+          </button>
+        </div>
+      </div>
+      <div id="historial" class="historial-lista"></div>
+    </section>
 
-        <!-- CONTADORES -->
-        <section id="contador-container" style="display:none;">
-            <div class="contador-box">
-                <div class="contador-item total">
-                    TOTAL <strong id="total-alumnos">0</strong>
-                </div>
-                <div class="contador-item aula">
-                    EN AULA <strong id="en-aula">0</strong>
-                </div>
-                <div class="contador-item salida">
-                    AFUERA <strong id="afuera">0</strong>
-                </div>
-                <div class="contador-item ausente">
-                    AUSENTES <strong id="ausentes">0</strong>
-                </div>
-            </div>
-        </section>
+  </div>
 
-        <!-- BUSCADOR -->
-        <section id="buscador-box" class="panel" style="display:none;">
-            <input type="text" id="buscador" placeholder="🔍 Buscar alumno por nombre o DNI..." autocomplete="off" oninput="render()">
-        </section>
+  <!-- AUDIO ALERTA -->
+  <audio id="alertSound" preload="auto">
+    <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav" type="audio/wav">
+  </audio>
+  <script src="app.js"></script>
 
-        <!-- GRID DE TARJETAS -->
-        <main id="grid"></main>
-
-        <!-- HISTORIAL -->
-        <section id="historial-container" class="panel" style="display:none;">
-            <div class="historial-top">
-                <h2>📋 MOVIMIENTOS RECIENTES</h2>
-                <div style="display: flex; gap: 8px;">
-                    <button class="theme-toggle" onclick="exportHistorialPDF()" title="Exportar Historial">
-                        📄
-                    </button>
-                    <button class="logout-btn" onclick="limpiarHistorialView()" title="Limpiar pantalla" style="background:#475569;">
-                        🧹
-                    </button>
-                </div>
-            </div>
-            <div id="historial" class="historial-lista"></div>
-        </section>
-
-    </div>
-
-    <!-- AUDIO ALERTA -->
-    <audio id="alertSound" preload="auto">
-        <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav" type="audio/wav">
-    </audio>
-<script src="app.js"></script>
-    
 </body>
+
 </html>

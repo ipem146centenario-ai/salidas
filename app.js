@@ -9,17 +9,110 @@
         let usuarioActivo = null;
         let timers = {};
         let ultimoAudioPlay = 0; // Throttle para el sonido de alarma
+        let autoRefreshTimer = null;
+        let isRefreshing = false;
+        let ultimoHashDatos = null;
+        let ultimoActualizado = null;
 
         /* =========================================================
            INIT
         ========================================================= */
         window.addEventListener("load", () => {
+            iniciarAutoActualizacion();
             cargarDatos();
+            toggleCausaAdicional();
             if (localStorage.getItem("theme") === "light") {
                 document.body.classList.add("light-mode");
                 document.getElementById("themeToggle").innerText = "☀️";
             }
         });
+
+        function iniciarAutoActualizacion() {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+            }
+            autoRefreshTimer = setInterval(() => {
+                if (!isRefreshing) {
+                    mostrarIndicadorActualizacion(true);
+                    cargarDatos(true);
+                }
+            }, 5000);
+        }
+
+        function detenerAutoActualizacion() {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            }
+        }
+
+        function toggleCausaAdicional() {
+            const causaSelect = document.getElementById("causa");
+            const causaAdicional = document.getElementById("causa-adicional");
+            if (!causaSelect || !causaAdicional) return;
+            if (causaSelect.value === "Otro") {
+                causaAdicional.style.display = "block";
+                causaAdicional.focus();
+            } else {
+                causaAdicional.style.display = "none";
+                causaAdicional.value = "";
+            }
+        }
+
+        function obtenerCausaSalida() {
+            const causaSelect = document.getElementById("causa");
+            const causaAdicional = document.getElementById("causa-adicional");
+            if (!causaSelect) return "Baño";
+
+            const causa = causaSelect.value || "Baño";
+            const detalle = causaAdicional ? causaAdicional.value.trim() : "";
+
+            if (causa === "Otro") {
+                return detalle ? `Otro: ${detalle}` : "Otro";
+            }
+
+            return detalle ? `${causa} (${detalle})` : causa;
+        }
+
+        function mostrarIndicadorActualizacion(show) {
+            const status = document.getElementById("refresh-status");
+            if (!status) return;
+            if (show) {
+                status.classList.remove("hidden");
+                status.classList.add("pulsing");
+            } else {
+                status.classList.add("hidden");
+                status.classList.remove("pulsing");
+            }
+        }
+
+        function manualRefresh() {
+            if (isRefreshing) return;
+            const button = document.getElementById("manualRefreshBtn");
+            if (button) button.disabled = true;
+            mostrarIndicadorActualizacion(true);
+            cargarDatos(true, true).finally(() => {
+                if (button) button.disabled = false;
+            });
+        }
+
+        function actualizarUltimaActualizacion(fecha = new Date()) {
+            ultimoActualizado = fecha;
+            const status = document.getElementById("last-updated");
+            if (!status) return;
+            status.textContent = `Última actualización: ${fecha.toLocaleDateString()} ${fecha.toLocaleTimeString()}`;
+        }
+
+        function stableStringify(value) {
+            if (value === null || typeof value !== "object") {
+                return JSON.stringify(value);
+            }
+            if (Array.isArray(value)) {
+                return '[' + value.map(stableStringify).join(',') + ']';
+            }
+            const keys = Object.keys(value).sort();
+            return '{' + keys.map(key => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';
+        }
 
         /* =========================================================
            DIALOGOS Y MODALES PERSONALIZADOS
@@ -140,8 +233,14 @@
             return "";
         }
 
-        async function cargarDatos() {
-            mostrarLoader(true, "Conectando con Google Sheets...");
+        async function cargarDatos(silent = false, forceToast = false) {
+            if (isRefreshing) return;
+            isRefreshing = true;
+            if (!silent) {
+                mostrarLoader(true, "Conectando con Google Sheets...");
+            } else {
+                mostrarIndicadorActualizacion(true);
+            }
             document.getElementById("cors-helper-panel").style.display = "none";
             
             try {
@@ -165,6 +264,18 @@
                     throw new Error(data.error || "Respuesta incorrecta de Google Sheets");
                 }
 
+                const hashActual = stableStringify(data);
+                if (ultimoHashDatos && hashActual === ultimoHashDatos) {
+                    actualizarUltimaActualizacion(new Date());
+                    if (!silent || forceToast) {
+                        showToast("No hay cambios en los datos.");
+                    }
+                    return;
+                }
+
+                ultimoHashDatos = hashActual;
+                actualizarUltimaActualizacion(new Date());
+
                 // Normalización inteligente de los alumnos para evitar incompatibilidades de acentos de cabecera
                 const rawAlumnos = data.alumnos || [];
                 alumnos = rawAlumnos.map(a => ({
@@ -186,13 +297,20 @@
                 render();
                 renderHistorial();
 
-                showToast("Datos Sincronizados.");
+                if (!silent || forceToast) {
+                    showToast("Datos Sincronizados.");
+                }
             } catch (error) {
                 console.error("Error al cargar datos:", error);
                 document.getElementById("cors-helper-panel").style.display = "block";
                 showToast("Error de conexión. Revisa las instrucciones en pantalla.", "error");
             } finally {
-                mostrarLoader(false);
+                if (!silent) {
+                    mostrarLoader(false);
+                } else {
+                    mostrarIndicadorActualizacion(false);
+                }
+                isRefreshing = false;
             }
         }
 
@@ -368,11 +486,42 @@
             }
         }
 
-        function render() {
+        function getFiltrosActivos() {
+            return {
+                curso: document.getElementById("fCurso").value,
+                division: document.getElementById("fDivision").value,
+                turno: document.getElementById("fTurno").value,
+                especialidad: document.getElementById("fEspecialidad").value,
+                busqueda: document.getElementById("buscador").value.toLowerCase().trim()
+            };
+        }
+
+        function alumnoCoincideFiltro(alumno, filtros) {
+            if (filtros.curso && alumno.curso !== filtros.curso) return false;
+            if (filtros.division && alumno.division !== filtros.division) return false;
+            if (filtros.turno && alumno.turno !== filtros.turno) return false;
+            if (filtros.especialidad && alumno.especialidad !== filtros.especialidad) return false;
+            if (filtros.busqueda) {
+                const nombreMatch = String(alumno.nombre || "").toLowerCase().includes(filtros.busqueda);
+                const dniMatch = cleanDni(alumno.dni).includes(cleanDni(filtros.busqueda));
+                if (!nombreMatch && !dniMatch) return false;
+            }
+            return true;
+        }
+
+        function crearTarjetaAlumno(alumno, regSalida) {
+            const dniLimpio = cleanDni(alumno.dni);
+            const div = document.createElement("div");
+            div.id = `alumno-${dniLimpio}`;
+            const { html, estadoClase } = construirTarjetaAlumnoHTML(alumno, regSalida);
+            div.className = `alumno ${estadoClase}`;
+            div.innerHTML = html;
+            return div;
+        }
+
+        function actualizarCartasVisibles() {
             const grid = document.getElementById("grid");
             if (!grid) return;
-            grid.innerHTML = "";
-
             if (!usuarioActivo) {
                 grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--muted);">
                     Por favor, inicia sesión para gestionar las salidas de los alumnos.
@@ -380,6 +529,222 @@
                 return;
             }
 
+            const filtros = getFiltrosActivos();
+            const alumnosVisibles = alumnos.filter(a => alumnoCoincideFiltro(a, filtros));
+            const visibleDnis = new Set();
+            let placeholder = document.getElementById("grid-empty-msg");
+
+            if (alumnosVisibles.length === 0) {
+                if (!placeholder) {
+                    placeholder = document.createElement("div");
+                    placeholder.id = "grid-empty-msg";
+                    placeholder.style.cssText = "grid-column: 1/-1; text-align: center; padding: 40px; color: var(--muted);";
+                    placeholder.innerHTML = "No se encontraron alumnos con estos filtros o búsqueda.";
+                    grid.appendChild(placeholder);
+                } else {
+                    placeholder.style.display = "";
+                }
+            } else if (placeholder) {
+                placeholder.style.display = "none";
+            }
+
+            alumnosVisibles.forEach((a) => {
+                const dniLimpio = cleanDni(a.dni);
+                visibleDnis.add(dniLimpio);
+                const regSalida = obtenerRegistroSalida(a);
+                let cardEl = document.getElementById(`alumno-${dniLimpio}`);
+
+                if (!cardEl) {
+                    cardEl = crearTarjetaAlumno(a, regSalida);
+                } else {
+                    const { html, estadoClase } = construirTarjetaAlumnoHTML(a, regSalida);
+                    cardEl.className = `alumno ${estadoClase}`;
+                    cardEl.innerHTML = html;
+                    cardEl.style.display = "";
+                }
+
+                grid.appendChild(cardEl);
+
+                if (regSalida) {
+                    const causaSalida = obtenerPropiedadSalida(regSalida, ['causa', 'destino', 'motivo', 'lugar']) || "";
+                    if (esSalidaConCronometro(causaSalida)) {
+                        iniciarCronometro(dniLimpio, detectarFechaSalida(regSalida));
+                    } else if (timers[dniLimpio]) {
+                        clearInterval(timers[dniLimpio]);
+                        delete timers[dniLimpio];
+                    }
+                } else if (timers[dniLimpio]) {
+                    clearInterval(timers[dniLimpio]);
+                    delete timers[dniLimpio];
+                }
+            });
+
+            grid.querySelectorAll(".alumno").forEach(card => {
+                const cardDni = card.id.replace(/^alumno-/, "");
+                if (!visibleDnis.has(cardDni)) {
+                    card.style.display = "none";
+                }
+            });
+        }
+
+        function render() {
+            actualizarCartasVisibles();
+            actualizarContadores();
+        }
+
+        function obtenerAlumnosVisibles() {
+            const fCurso = document.getElementById("fCurso").value;
+            const fDivision = document.getElementById("fDivision").value;
+            const fTurno = document.getElementById("fTurno").value;
+            const fEsp = document.getElementById("fEspecialidad").value;
+            const busqueda = document.getElementById("buscador").value.toLowerCase().trim();
+
+            return alumnos.filter((a) => {
+                if (fCurso && a.curso !== fCurso) return false;
+                if (fDivision && a.division !== fDivision) return false;
+                if (fTurno && a.turno !== fTurno) return false;
+                if (fEsp && a.especialidad !== fEsp) return false;
+                if (busqueda) {
+                    const nombreMatch = String(a.nombre || "").toLowerCase().includes(busqueda);
+                    const dniMatch = cleanDni(a.dni).includes(cleanDni(busqueda));
+                    if (!nombreMatch && !dniMatch) return false;
+                }
+                return true;
+            });
+        }
+
+        function obtenerRegistroSalida(alumno) {
+            return salidas.find((s) => {
+                const rowDni = s.dni || s.DNI || s['dni'] || '';
+                const rowRegreso = obtenerPropiedadSalida(s, ['regreso', 'retorno', 'fin']);
+                const rowEstado = obtenerPropiedadSalida(s, ['estado', 'status']);
+                return (
+                    cleanDni(rowDni) === cleanDni(alumno.dni) &&
+                    (!rowRegreso || rowRegreso === "" || String(rowEstado).toUpperCase() === "AFUERA")
+                );
+            });
+        }
+
+        function esSalidaConCronometro(causa) {
+            if (!causa) return false;
+            return /ba[nñ]o/i.test(String(causa));
+        }
+
+        function construirTarjetaAlumnoHTML(a, regSalida) {
+            let estadoClase = "in";
+            let textoEstado = "🟢 EN AULA";
+            const esAusente = String(a.estado || "").toUpperCase() === "AUSENTE";
+            const esTarde = String(a.estado || "").toUpperCase() === "TARDE";
+            const esRetiro = String(a.estado || "").toUpperCase() === "RETIRO";
+
+            // Determinar clase de estado para la tarjeta
+            if (esAusente) {
+                estadoClase = "ausente";
+            } else if (esRetiro) {
+                estadoClase = "retiro";
+            } else if (regSalida) {
+                estadoClase = "out";
+            } else {
+                estadoClase = "in";
+            }
+
+            // Determinar texto de estado
+            if (esAusente) {
+                textoEstado = "❌ AUSENTE";
+            } else if (esRetiro) {
+                textoEstado = "👨‍👩‍👦 RETIRADO";
+            } else if (regSalida) {
+                const causaDestino = obtenerPropiedadSalida(regSalida, ['causa', 'destino', 'motivo', 'lugar']) || "Salida";
+                textoEstado = `🚪 AFUERA (${causaDestino})${esTarde ? ' — ⏰ LLEGÓ TARDE' : ''}`;
+            } else if (esTarde) {
+                textoEstado = "⏰ LLEGÓ TARDE";
+            } else {
+                textoEstado = "🟢 EN AULA";
+            }
+
+            let html = `
+                <div>
+                    ${esTarde ? `<div class="badge-tarde">⏰ TARDE${a.horaLlegadaTarde ? ` - ${a.horaLlegadaTarde}` : ''}</div>` : ''}
+                    <span class="nombre">${a.nombre}</span>
+                    <div class="curso-info">Curso: ${a.curso || '-'} ${a.division || ''} | DNI: ${a.dni}</div>
+            `;
+
+            // Mostrar estado
+            if (esAusente) {
+                html += `<div class="label-ausente">${textoEstado}</div>`;
+            } else if (esRetiro) {
+                html += `<div class="estado-retiro">${textoEstado}</div>`;
+            } else if (esTarde && !regSalida) {
+                html += `<div class="label-tarde">${textoEstado}</div>`;
+                if (a.horaLlegadaTarde) {
+                    html += `<div class="hora-llegada-tarde">🕐 Llegó a las ${a.horaLlegadaTarde}</div>`;
+                }
+            } else if (regSalida) {
+                const causaDestino = obtenerPropiedadSalida(regSalida, ['causa', 'destino', 'motivo', 'lugar']) || "Salida";
+                const mostrarTimer = esSalidaConCronometro(causaDestino);
+                const badgeTipo = mostrarTimer ? 'timed' : 'not-timed';
+                const badgeTexto = mostrarTimer ? 'Cronómetro activo' : 'Salida sin cronómetro';
+
+                html += `<div class="motivo-destacado">${textoEstado}</div>`;
+                html += `<div class="causa-badge ${badgeTipo}">${badgeTexto}</div>`;
+                if (mostrarTimer) {
+                    html += `
+                        <div class="timer-box" id="timer-${cleanDni(a.dni)}">🕒 Calculando...</div>
+                    `;
+                } else {
+                    html += `<div class="timer-note">Recreos y otras salidas no se cronometran en este panel; registra el regreso normalmente.</div>`;
+                }
+            } else {
+                html += `
+                    <div class="estado-aula">${textoEstado}</div>
+                `;
+            }
+
+            // Mostrar botones de acción (salida/regreso para todos excepto AUSENTE y RETIRO)
+            if (regSalida) {
+                html += `
+                    <button class="btn-card regreso" onclick="registrarRegreso('${a.dni}')">
+                        REGISTRAR REGRESO
+                    </button>
+                `;
+            } else if (!esAusente && !esRetiro) {
+                html += `
+                    <button class="btn-card" onclick="registrarSalida('${a.dni}')">
+                        REGISTRAR SALIDA
+                    </button>
+                `;
+            }
+
+            // Opciones de preceptor
+            const esPreceptor = String(usuarioActivo.rol || usuarioActivo.cargo || "").toUpperCase() === "PRECEPTOR" || true;
+            if (esPreceptor && !esAusente && !esRetiro && !regSalida) {
+                html += `
+                    <div class="acciones-preceptor">
+                        <button class="btn-mini rojo" onclick="cambiarEstadoPreceptor('${a.dni}', 'AUSENTE')">AUSENTE</button>
+                        <button class="btn-mini naranja" onclick="cambiarEstadoPreceptor('${a.dni}', 'LLEGADA TARDE')">TARDE</button>
+                        <button class="btn-mini azul" onclick="cambiarEstadoPreceptor('${a.dni}', 'RETIRO PADRE/TUTOR')">RETIRO</button>
+                    </div>
+                `;
+                if (esTarde) {
+                    html += `
+                        <div class="acciones-preceptor" style="margin-top: 10px;">
+                            <button class="btn-mini azul" onclick="cambiarEstadoPreceptor('${a.dni}', 'PRESENTE')" style="width:100%">REINCORPORAR (PRESENTE)</button>
+                        </div>
+                    `;
+                }
+            } else if (esPreceptor && (esAusente || esRetiro)) {
+                html += `
+                    <div class="acciones-preceptor">
+                        <button class="btn-mini azul" onclick="cambiarEstadoPreceptor('${a.dni}', 'PRESENTE')" style="width:100%">REINCORPORAR (PRESENTE)</button>
+                    </div>
+                `;
+            }
+
+            html += `</div>`;
+            return { html, estadoClase };
+        }
+
+        function actualizarContadores() {
             const fCurso = document.getElementById("fCurso").value;
             const fDivision = document.getElementById("fDivision").value;
             const fTurno = document.getElementById("fTurno").value;
@@ -396,7 +761,6 @@
                 if (fDivision && a.division !== fDivision) return;
                 if (fTurno && a.turno !== fTurno) return;
                 if (fEsp && a.especialidad !== fEsp) return;
-
                 if (busqueda) {
                     const nombreMatch = String(a.nombre || "").toLowerCase().includes(busqueda);
                     const dniMatch = cleanDni(a.dni).includes(cleanDni(busqueda));
@@ -404,97 +768,14 @@
                 }
 
                 totalInscriptos++;
+                const regSalida = obtenerRegistroSalida(a);
 
-                const regSalida = salidas.find((s) => {
-                    const rowDni = s.dni || s.DNI || s['dni'] || '';
-                    const rowRegreso = obtenerPropiedadSalida(s, ['regreso', 'retorno', 'fin']);
-                    const rowEstado = obtenerPropiedadSalida(s, ['estado', 'status']);
-                    return (
-                        cleanDni(rowDni) === cleanDni(a.dni) &&
-                        (!rowRegreso || rowRegreso === "" || String(rowEstado).toUpperCase() === "AFUERA")
-                    );
-                });
-
-                const div = document.createElement("div");
-                div.id = `alumno-${cleanDni(a.dni)}`;
-                
-                let estadoClase = "in";
-                let textoEstado = "🟢 EN AULA";
-
-                if (a.estado === "AUSENTE") {
-                    estadoClase = "ausente";
-                    textoEstado = "❌ AUSENTE";
-                    totalAusentes++;
-                } else if (a.estado === "TARDE") {
-                    estadoClase = "ausente";
-                    textoEstado = "⏰ LLEGÓ TARDE";
-                    totalAusentes++;
-                } else if (a.estado === "RETIRO") {
-                    estadoClase = "retiro";
-                    textoEstado = "👨‍👩‍👦 RETIRADO";
+                if (a.estado === "AUSENTE" || a.estado === "RETIRO") {
                     totalAusentes++;
                 } else if (regSalida) {
-                    estadoClase = "out";
-                    const causaDestino = obtenerPropiedadSalida(regSalida, ['causa', 'destino', 'motivo', 'lugar']) || "Salida";
-                    textoEstado = `🚪 AFUERA (${causaDestino})`;
                     totalAfuera++;
                 } else {
                     totalAula++;
-                }
-
-                div.className = `alumno ${estadoClase}`;
-
-                let html = `
-                    <div>
-                        <span class="nombre">${a.nombre}</span>
-                        <div class="curso-info">Curso: ${a.curso || '-'} ${a.division || ''} | DNI: ${a.dni}</div>
-                `;
-
-                if (a.estado === "AUSENTE" || a.estado === "TARDE") {
-                    html += `<div class="label-ausente">${textoEstado}</div>`;
-                } else if (a.estado === "RETIRO") {
-                    html += `<div class="estado-retiro">${textoEstado}</div>`;
-                } else if (regSalida) {
-                    html += `
-                        <div class="motivo-destacado">${textoEstado}</div>
-                        <div class="timer-box" id="timer-${cleanDni(a.dni)}">🕒 Calculando...</div>
-                        <button class="btn-card regreso" onclick="registrarRegreso('${a.dni}')">
-                            REGISTRAR REGRESO
-                        </button>
-                    `;
-                } else {
-                    html += `
-                        <div class="estado-aula">${textoEstado}</div>
-                        <button class="btn-card" onclick="registrarSalida('${a.dni}')">
-                            REGISTRAR SALIDA
-                        </button>
-                    `;
-                }
-
-                const esPreceptor = String(usuarioActivo.rol || usuarioActivo.cargo || "").toUpperCase() === "PRECEPTOR" || true;
-                if (esPreceptor && a.estado !== "AUSENTE" && a.estado !== "RETIRO" && !regSalida) {
-                    html += `
-                        <div class="acciones-preceptor">
-                            <button class="btn-mini rojo" onclick="cambiarEstadoPreceptor('${a.dni}', 'AUSENTE')">AUSENTE</button>
-                            <button class="btn-mini naranja" onclick="cambiarEstadoPreceptor('${a.dni}', 'LLEGADA TARDE')">TARDE</button>
-                            <button class="btn-mini azul" onclick="cambiarEstadoPreceptor('${a.dni}', 'RETIRO PADRE/TUTOR')">RETIRO</button>
-                        </div>
-                    `;
-                } else if (esPreceptor && (a.estado === "AUSENTE" || a.estado === "TARDE" || a.estado === "RETIRO")) {
-                    html += `
-                        <div class="acciones-preceptor">
-                            <button class="btn-mini azul" onclick="cambiarEstadoPreceptor('${a.dni}', 'PRESENTE')" style="width:100%">REINCORPORAR (PRESENTE)</button>
-                        </div>
-                    `;
-                }
-
-                html += `</div>`;
-                div.innerHTML = html;
-                grid.appendChild(div);
-
-                if (regSalida) {
-                    const timestampSalida = detectarFechaSalida(regSalida);
-                    iniciarCronometro(cleanDni(a.dni), timestampSalida);
                 }
             });
 
@@ -502,6 +783,29 @@
             document.getElementById("en-aula").textContent = totalAula;
             document.getElementById("afuera").textContent = totalAfuera;
             document.getElementById("ausentes").textContent = totalAusentes;
+        }
+
+        function actualizarTarjetaAlumno(alumno) {
+            const dniLimpio = cleanDni(alumno.dni);
+            const cardEl = document.getElementById(`alumno-${dniLimpio}`);
+            const regSalida = obtenerRegistroSalida(alumno);
+            const { html, estadoClase } = construirTarjetaAlumnoHTML(alumno, regSalida);
+
+            if (cardEl) {
+                cardEl.className = `alumno ${estadoClase}`;
+                cardEl.innerHTML = html;
+                if (regSalida) {
+                    const causaSalida = obtenerPropiedadSalida(regSalida, ['causa', 'destino', 'motivo', 'lugar']) || "";
+                    if (esSalidaConCronometro(causaSalida)) {
+                        const timestampSalida = detectarFechaSalida(regSalida);
+                        iniciarCronometro(dniLimpio, timestampSalida);
+                    } else if (timers[dniLimpio]) {
+                        clearInterval(timers[dniLimpio]);
+                        delete timers[dniLimpio];
+                    }
+                }
+                actualizarContadores();
+            }
         }
 
         function iniciarCronometro(dniLimpio, fechaSalidaStr) {
@@ -586,8 +890,9 @@
             const causa = prompt(`Indique destino para ${alumno.nombre}:`, causaPorDefecto);
             if (causa === null) return; 
 
-            mostrarLoader(true, "Registrando salida en la nube...");
+            mostrarIndicadorActualizacion(true);
             try {
+                const motivoSalida = obtenerCausaSalida();
                 const result = await enviarTransaccionPost({
                     tipoAccion: "movimiento",
                     tipo: "salida",
@@ -598,17 +903,29 @@
                     turno: alumno.turno,
                     especialidad: alumno.especialidad,
                     docente: usuarioActivo.nombre || usuarioActivo.usuario,
-                    causa: causa || causaPorDefecto
+                    causa: motivoSalida
                 });
 
                 if (!result.ok) throw new Error(result.error);
 
+                const nuevaSalida = {
+                    dni: alumno.dni,
+                    salida: new Date().toISOString(),
+                    regreso: "",
+                    estado: "AFUERA",
+                    causa: motivoSalida
+                };
+                salidas.push(nuevaSalida);
+                ultimoHashDatos = null;
+
                 showToast(`Salida registrada correctamente para ${alumno.nombre}.`);
-                await cargarDatos();
+                actualizarTarjetaAlumno(alumno);
+                actualizarContadores();
+                mostrarIndicadorActualizacion(false);
             } catch (error) {
                 console.error(error);
                 showToast("Error al registrar salida: " + error.message, "error");
-                mostrarLoader(false);
+                mostrarIndicadorActualizacion(false);
             }
         }
 
@@ -622,7 +939,7 @@
                 delete timers[dniLimpio];
             }
 
-            mostrarLoader(true, "Registrando regreso en la nube...");
+            mostrarIndicadorActualizacion(true);
             try {
                 const result = await enviarTransaccionPost({
                     tipoAccion: "movimiento",
@@ -634,13 +951,143 @@
 
                 if (!result.ok) throw new Error(result.error);
 
+                const registro = salidas.slice().reverse().find((s) => {
+                    const rowDni = s.dni || s.DNI || s['dni'] || '';
+                    const rowRegreso = obtenerPropiedadSalida(s, ['regreso', 'retorno', 'fin']);
+                    return cleanDni(rowDni) === dniLimpio && (!rowRegreso || rowRegreso === "");
+                });
+                if (registro) {
+                    registro.regreso = new Date().toISOString();
+                    registro.estado = "EN AULA";
+                }
+                ultimoHashDatos = null;
+
                 showToast(`Regreso de ${alumno.nombre} registrado con éxito.`);
-                await cargarDatos();
+                actualizarTarjetaAlumno(alumno);
+                actualizarContadores();
+                mostrarIndicadorActualizacion(false);
             } catch (error) {
                 console.error(error);
                 showToast("Error al registrar regreso: " + error.message, "error");
-                mostrarLoader(false);
+                mostrarIndicadorActualizacion(false);
             }
+        }
+
+        async function marcarRecreoParaTodos() {
+            const confirmar = await mostrarConfirmacion(
+                "Recreo para todos",
+                "¿Registrar recreo para todos los alumnos visibles?"
+            );
+            if (!confirmar) return;
+
+            const alumnosVisibles = obtenerAlumnosVisibles().filter((a) => {
+                const regSalida = obtenerRegistroSalida(a);
+                return !regSalida && a.estado !== "AUSENTE" && a.estado !== "RETIRO";
+            });
+
+            if (!alumnosVisibles.length) {
+                showToast("No hay alumnos en aula para enviar a recreo.", "error");
+                return;
+            }
+
+            mostrarIndicadorActualizacion(true);
+            let ok = 0;
+            let fail = 0;
+
+            for (const alumno of alumnosVisibles) {
+                try {
+                    const motivoSalida = "Recreo";
+                    const result = await enviarTransaccionPost({
+                        tipoAccion: "movimiento",
+                        tipo: "salida",
+                        dni: cleanDni(alumno.dni),
+                        nombre: alumno.nombre,
+                        curso: alumno.curso,
+                        division: alumno.division,
+                        turno: alumno.turno,
+                        especialidad: alumno.especialidad,
+                        docente: usuarioActivo.nombre || usuarioActivo.usuario,
+                        causa: motivoSalida
+                    });
+
+                    if (!result.ok) throw new Error(result.error || "Error en servidor");
+
+                    salidas.push({
+                        dni: alumno.dni,
+                        salida: new Date().toISOString(),
+                        regreso: "",
+                        estado: "AFUERA",
+                        causa: motivoSalida
+                    });
+                    ok++;
+                } catch (error) {
+                    console.error(error);
+                    fail++;
+                }
+            }
+
+            ultimoHashDatos = null;
+            render();
+            mostrarIndicadorActualizacion(false);
+            if (ok > 0) showToast(`Recreo registrado para ${ok} alumno${ok === 1 ? '' : 's'}.`);
+            if (fail > 0) showToast(`${fail} movimiento${fail === 1 ? '' : 's'} fallaron.`, "error");
+        }
+
+        async function marcarAulaParaTodos() {
+            const confirmar = await mostrarConfirmacion(
+                "Aula para todos",
+                "¿Registrar regreso a aula para todos los alumnos visibles que están fuera?"
+            );
+            if (!confirmar) return;
+
+            const alumnosVisibles = obtenerAlumnosVisibles().filter((a) => obtenerRegistroSalida(a) && a.estado !== "AUSENTE" && a.estado !== "RETIRO");
+            if (!alumnosVisibles.length) {
+                showToast("No hay alumnos fuera para traer de regreso.", "error");
+                return;
+            }
+
+            mostrarIndicadorActualizacion(true);
+            let ok = 0;
+            let fail = 0;
+
+            for (const alumno of alumnosVisibles) {
+                try {
+                    const result = await enviarTransaccionPost({
+                        tipoAccion: "movimiento",
+                        tipo: "regreso",
+                        dni: cleanDni(alumno.dni),
+                        nombre: alumno.nombre,
+                        docente: usuarioActivo.nombre || usuarioActivo.usuario
+                    });
+
+                    if (!result.ok) throw new Error(result.error || "Error en servidor");
+
+                    const registro = salidas.slice().reverse().find((s) => {
+                        const rowDni = s.dni || s.DNI || s['dni'] || '';
+                        const rowRegreso = obtenerPropiedadSalida(s, ['regreso', 'retorno', 'fin']);
+                        const rowEstado = obtenerPropiedadSalida(s, ['estado', 'status']);
+                        return (
+                            cleanDni(rowDni) === cleanDni(alumno.dni) &&
+                            (!rowRegreso || rowRegreso === "" || String(rowEstado).toUpperCase() === "AFUERA")
+                        );
+                    });
+
+                    if (registro) {
+                        registro.regreso = new Date().toISOString();
+                        registro.estado = "EN AULA";
+                    }
+                    ok++;
+                } catch (error) {
+                    console.error(error);
+                    fail++;
+                }
+            }
+
+            ultimoHashDatos = null;
+            render();
+            mostrarIndicadorActualizacion(false);
+            if (ok > 0) showToast(`Aula registrada para ${ok} alumno${ok === 1 ? '' : 's'}.`);
+            if (fail > 0) showToast(`${fail} movimiento${fail === 1 ? '' : 's'} fallaron.`, "error");
         }
 
         async function cambiarEstadoPreceptor(dni, accion) {
@@ -653,24 +1100,47 @@
             );
             if (!confirmar) return;
 
-            mostrarLoader(true, "Actualizando asistencia...");
+            mostrarIndicadorActualizacion(true);
             try {
-                const result = await enviarTransaccionPost({
+                const ahora = new Date();
+                const horaFormato = ahora.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+                const payload = {
                     tipoAccion: "preceptor",
                     accion: accion,
                     dni: cleanDni(alumno.dni), 
                     nombre: alumno.nombre,
                     docente: usuarioActivo.nombre || usuarioActivo.usuario
-                });
+                };
+                
+                if (accion === "LLEGADA TARDE") {
+                    payload.horaLlegadaTarde = horaFormato;
+                }
+                
+                const result = await enviarTransaccionPost(payload);
 
                 if (!result.ok) throw new Error(result.error);
 
+                if (accion === "AUSENTE") {
+                    alumno.estado = "AUSENTE";
+                } else if (accion === "LLEGADA TARDE") {
+                    alumno.estado = "TARDE";
+                    alumno.horaLlegadaTarde = horaFormato;
+                } else if (accion === "RETIRO PADRE/TUTOR") {
+                    alumno.estado = "RETIRO";
+                } else if (accion === "PRESENTE") {
+                    alumno.estado = "";
+                    alumno.horaLlegadaTarde = "";
+                }
+                ultimoHashDatos = null;
+
                 showToast(`Estado de ${alumno.nombre} actualizado a ${accion}.`);
-                await cargarDatos();
+                actualizarTarjetaAlumno(alumno);
+                actualizarContadores();
+                mostrarIndicadorActualizacion(false);
             } catch (error) {
                 console.error(error);
                 showToast("Error al actualizar estado: " + error.message, "error");
-                mostrarLoader(false);
+                mostrarIndicadorActualizacion(false);
             }
         }
 
@@ -786,6 +1256,19 @@
             } else {
                 btn.innerText = "🌙";
                 localStorage.setItem("theme", "dark");
+            }
+        }
+
+        function toggleMostrarPin() {
+            const input = document.getElementById("passDocente");
+            const btn = document.querySelector(".pin-input-wrapper .btn-toggle-pin");
+            
+            if (input.type === "password") {
+                input.type = "text";
+                btn.innerText = "🙈";
+            } else {
+                input.type = "password";
+                btn.innerText = "👁️";
             }
         }
   
