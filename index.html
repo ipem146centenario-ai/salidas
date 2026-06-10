@@ -211,20 +211,56 @@
         oninput="render()">
     </section>
 
-    <!-- RESUMEN AUSENTES, TARDE Y SALIDAS -->
+    <!-- RESUMEN — BOTONES POPUP -->
     <section id="resumen-container" style="display:none;">
-      <div id="resumen-ausentes-box" class="resumen-grupo" style="display:none;">
-        <div class="resumen-titulo resumen-titulo-ausente">❌ AUSENTES <span id="resumen-ausentes-count" class="resumen-badge">0</span></div>
-        <div id="resumen-ausentes-lista" class="resumen-lista"></div>
+      <div class="resumen-botones-row">
+        <button id="btn-resumen-ausentes" class="resumen-btn resumen-btn-ausente" style="display:none;" onclick="abrirPopupLista('ausente', _listaAusentes)">
+          ❌ AUSENTES <span id="resumen-ausentes-count" class="resumen-badge">0</span>
+        </button>
+        <button id="btn-resumen-tarde" class="resumen-btn resumen-btn-tarde" style="display:none;" onclick="abrirPopupLista('tarde', _listaTarde)">
+          ⏰ LLEGADA TARDE <span id="resumen-tarde-count" class="resumen-badge">0</span>
+        </button>
+        <button id="btn-resumen-salidas" class="resumen-btn resumen-btn-salida" style="display:none;" onclick="abrirPopupLista('salida', _listaSalidas)">
+          🚪 AFUERA <span id="resumen-salidas-count" class="resumen-badge">0</span>
+        </button>
+        <button id="btn-resumen-retirados" class="resumen-btn resumen-btn-retirado" style="display:none;" onclick="abrirPopupLista('retiro', _listaRetirados)">
+          👪 RETIRADOS <span id="resumen-retirados-count" class="resumen-badge">0</span>
+        </button>
       </div>
-      <div id="resumen-tarde-box" class="resumen-grupo" style="display:none;">
-        <div class="resumen-titulo resumen-titulo-tarde">⏰ LLEGADA TARDE <span id="resumen-tarde-count" class="resumen-badge">0</span></div>
-        <div id="resumen-tarde-lista" class="resumen-lista"></div>
+    </section>
+
+    <!-- PANEL DE ALERTAS ACTIVAS (solo directivo) -->
+    <section id="panel-alertas" class="panel" style="display:none;">
+      <div class="alertas-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span class="alertas-icono-titulo">🚨</span>
+          <h2 class="alertas-titulo">ALERTAS ACTIVAS</h2>
+          <span id="alertas-badge" class="alertas-badge">0</span>
+        </div>
+        <button id="alertas-refresh-btn" class="btn-mini azul" onclick="actualizarAlertas()" style="flex:0; min-width:unset; padding:6px 14px;">↻ Actualizar</button>
       </div>
-      <div id="resumen-salidas-box" class="resumen-grupo" style="display:none;">
-        <div class="resumen-titulo resumen-titulo-salida">🚪 AFUERA <span id="resumen-salidas-count" class="resumen-badge">0</span></div>
-        <div id="resumen-salidas-lista" class="resumen-lista"></div>
+      <div id="alertas-lista" class="alertas-lista">
+        <div class="alertas-empty">Sin alertas activas ✅</div>
       </div>
+    </section>
+
+    <!-- DASHBOARD GLOBAL POR CURSO (solo directivo) -->
+    <section id="panel-dashboard" class="panel" style="display:none;">
+      <div class="dashboard-header">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <span style="font-size:20px;">📊</span>
+          <h2 class="dashboard-titulo">ESTADO POR CURSO</h2>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <select id="dashboard-filtro-turno" class="pl-filtro-select" onchange="actualizarDashboard()" style="max-width:140px;">
+            <option value="">Todos los turnos</option>
+          </select>
+          <select id="dashboard-filtro-esp" class="pl-filtro-select" onchange="actualizarDashboard()" style="max-width:160px;">
+            <option value="">Todas las especialidades</option>
+          </select>
+        </div>
+      </div>
+      <div id="dashboard-grid" class="dashboard-grid"></div>
     </section>
 
     <!-- GRID DE TARJETAS -->

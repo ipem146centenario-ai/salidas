@@ -144,6 +144,40 @@ const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQ
             return String(val);
         }
 
+        // Formatea cualquier valor de hora/fecha en formato legible HH:MM o dd/MM HH:MM
+        function formatHora(val) {
+            if (!val && val !== 0) return '';
+            const s = String(val).trim();
+            if (!s) return '';
+
+            // Si parece solo hora HH:MM o HH:MM:SS -> devolver solo HH:MM
+            if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) return s.substring(0, 5);
+
+            let d = null;
+            if (typeof val === 'number') {
+                d = new Date(val);
+            } else {
+                // dd/MM/yyyy -> yyyy-MM-dd para parseo seguro
+                const norm = s.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1');
+                try { d = new Date(norm); } catch(e) {}
+                if (!d || isNaN(d.getTime())) {
+                    try { d = new Date(s); } catch(e) {}
+                }
+            }
+
+            if (d && !isNaN(d.getTime())) {
+                const hh = String(d.getHours()).padStart(2, '0');
+                const mm = String(d.getMinutes()).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                const mo = String(d.getMonth() + 1).padStart(2, '0');
+                // Si la hora es medianoche exacta, probablemente es solo fecha → mostrar dd/MM
+                if (hh === '00' && mm === '00') return `${dd}/${mo}`;
+                return `${dd}/${mo} ${hh}:${mm}`;
+            }
+
+            return s;
+        }
+
         /* =========================================================
            DIALOGOS Y MODALES PERSONALIZADOS
         ========================================================= */
@@ -773,6 +807,16 @@ const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQ
                     document.getElementById("contador-container").style.display = "block";
                     document.getElementById("buscador-box").style.display = "block";
                     document.getElementById("historial-container").style.display = "block";
+
+                    // Paneles exclusivos del directivo
+                    const esDirectivo = esRolDirectivo(docenteEncontrado);
+                    document.getElementById("panel-alertas").style.display = esDirectivo ? "block" : "none";
+                    document.getElementById("panel-dashboard").style.display = esDirectivo ? "block" : "none";
+                    if (esDirectivo) {
+                        actualizarFiltrosDashboard();
+                        actualizarDashboard();
+                        actualizarAlertas();
+                    }
                     
                     const rolBox = document.getElementById("rolActivo");
                     rolBox.textContent = `👤 ${nombreSel}`;
@@ -803,6 +847,8 @@ const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQ
             document.getElementById("resumen-container").style.display = "none";
             document.getElementById("rolActivo").style.display = "none";
             document.getElementById("logoutBtn").style.display = "none";
+            document.getElementById("panel-alertas").style.display = "none";
+            document.getElementById("panel-dashboard").style.display = "none";
             
             Object.keys(timers).forEach(k => clearInterval(timers[k]));
             timers = {};
@@ -1020,11 +1066,16 @@ const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQ
             actualizarResumen();
         }
 
+        // Listas globales para los popups del resumen
+        let _listaAusentes = [];
+        let _listaTarde = [];
+        let _listaSalidas = [];
+        let _listaRetirados = [];
+
         function actualizarResumen() {
             const resumenContainer = document.getElementById("resumen-container");
             if (!resumenContainer) return;
 
-            // Solo mostrar si hay usuario activo
             if (!usuarioActivo) {
                 resumenContainer.style.display = "none";
                 return;
@@ -1033,28 +1084,15 @@ const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQ
             const filtros = getFiltrosActivos();
             const alumnosVisibles = alumnos.filter(a => alumnoCoincideFiltro(a, filtros));
 
-            const ausentes = alumnosVisibles.filter(a =>
+            _listaAusentes = alumnosVisibles.filter(a =>
                 String(a.estado || "").toUpperCase() === "AUSENTE"
             ).sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), 'es', { sensitivity: 'base' }));
 
-            const tarde = alumnosVisibles.filter(a =>
+            _listaTarde = alumnosVisibles.filter(a =>
                 /TARDE/i.test(String(a.estado || "")) && String(a.estado || "").toUpperCase() !== "AUSENTE"
             ).sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), 'es', { sensitivity: 'base' }));
 
-            const boxAusentes = document.getElementById("resumen-ausentes-box");
-            const listaAusentes = document.getElementById("resumen-ausentes-lista");
-            const countAusentes = document.getElementById("resumen-ausentes-count");
-
-            const boxTarde = document.getElementById("resumen-tarde-box");
-            const listaTarde = document.getElementById("resumen-tarde-lista");
-            const countTarde = document.getElementById("resumen-tarde-count");
-
-            const boxSalidas = document.getElementById("resumen-salidas-box");
-            const listaSalidas = document.getElementById("resumen-salidas-lista");
-            const countSalidas = document.getElementById("resumen-salidas-count");
-
-            // Alumnos actualmente afuera (con registro de salida activo, no ausentes)
-            const afuera = alumnosVisibles.filter(a => {
+            _listaSalidas = alumnosVisibles.filter(a => {
                 if (String(a.estado || "").toUpperCase() === "AUSENTE") return false;
                 return !!obtenerRegistroSalida(a);
             }).map(a => {
@@ -1065,57 +1103,58 @@ const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQ
                 });
             }).sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), 'es', { sensitivity: 'base' }));
 
-            if (ausentes.length > 0) {
-                boxAusentes.style.display = "";
-                countAusentes.textContent = ausentes.length;
-                listaAusentes.innerHTML = ausentes.map(a =>
-                    `<span class="resumen-chip resumen-chip-ausente">${escapeHtml(a.nombre)}${a.curso ? ` <em>${escapeHtml(a.curso)} ${escapeHtml(a.division || '')}</em>` : ''}</span>`
-                ).join('');
-                const tituloAusentes = boxAusentes.querySelector('.resumen-titulo');
-                if (tituloAusentes) {
-                    tituloAusentes.style.cursor = 'pointer';
-                    tituloAusentes.title = 'Ver lista completa';
-                    tituloAusentes.onclick = () => abrirPopupLista('ausente', ausentes);
+            _listaRetirados = alumnosVisibles.filter(a =>
+                /RETIRO/i.test(String(a.estado || ""))
+            ).sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), 'es', { sensitivity: 'base' }));
+
+            const btnAusentes   = document.getElementById("btn-resumen-ausentes");
+            const btnTarde      = document.getElementById("btn-resumen-tarde");
+            const btnSalidas    = document.getElementById("btn-resumen-salidas");
+            const btnRetirados  = document.getElementById("btn-resumen-retirados");
+            const countAusentes  = document.getElementById("resumen-ausentes-count");
+            const countTarde     = document.getElementById("resumen-tarde-count");
+            const countSalidas   = document.getElementById("resumen-salidas-count");
+            const countRetirados = document.getElementById("resumen-retirados-count");
+
+            if (btnAusentes) {
+                if (_listaAusentes.length > 0) {
+                    btnAusentes.style.display = "";
+                    if (countAusentes) countAusentes.textContent = _listaAusentes.length;
+                } else {
+                    btnAusentes.style.display = "none";
                 }
-            } else {
-                boxAusentes.style.display = "none";
             }
 
-            if (tarde.length > 0) {
-                boxTarde.style.display = "";
-                countTarde.textContent = tarde.length;
-                listaTarde.innerHTML = tarde.map(a =>
-                    `<span class="resumen-chip resumen-chip-tarde">${escapeHtml(a.nombre)}${a.horaLlegadaTarde ? ` <em>${escapeHtml(a.horaLlegadaTarde)}</em>` : ''}${a.curso ? ` <em>${escapeHtml(a.curso)} ${escapeHtml(a.division || '')}</em>` : ''}</span>`
-                ).join('');
-                const tituloTarde = boxTarde.querySelector('.resumen-titulo');
-                if (tituloTarde) {
-                    tituloTarde.style.cursor = 'pointer';
-                    tituloTarde.title = 'Ver lista completa';
-                    tituloTarde.onclick = () => abrirPopupLista('tarde', tarde);
+            if (btnTarde) {
+                if (_listaTarde.length > 0) {
+                    btnTarde.style.display = "";
+                    if (countTarde) countTarde.textContent = _listaTarde.length;
+                } else {
+                    btnTarde.style.display = "none";
                 }
-            } else {
-                boxTarde.style.display = "none";
             }
 
-            if (afuera.length > 0 && boxSalidas) {
-                boxSalidas.style.display = "";
-                countSalidas.textContent = afuera.length;
-                listaSalidas.innerHTML = afuera.map(a =>
-                    `<span class="resumen-chip resumen-chip-salida">${escapeHtml(a.nombre)}${a._causa ? ` <em>${escapeHtml(a._causa)}</em>` : ''}${a.curso ? ` <em>${escapeHtml(a.curso)} ${escapeHtml(a.division || '')}</em>` : ''}</span>`
-                ).join('');
-                const tituloSalidas = boxSalidas.querySelector('.resumen-titulo');
-                if (tituloSalidas) {
-                    tituloSalidas.style.cursor = 'pointer';
-                    tituloSalidas.title = 'Ver lista completa';
-                    tituloSalidas.onclick = () => abrirPopupLista('salida', afuera);
+            if (btnSalidas) {
+                if (_listaSalidas.length > 0) {
+                    btnSalidas.style.display = "";
+                    if (countSalidas) countSalidas.textContent = _listaSalidas.length;
+                } else {
+                    btnSalidas.style.display = "none";
                 }
-            } else if (boxSalidas) {
-                boxSalidas.style.display = "none";
             }
 
-            resumenContainer.style.display = (ausentes.length > 0 || tarde.length > 0 || afuera.length > 0) ? "" : "none";
+            if (btnRetirados) {
+                if (_listaRetirados.length > 0) {
+                    btnRetirados.style.display = "";
+                    if (countRetirados) countRetirados.textContent = _listaRetirados.length;
+                } else {
+                    btnRetirados.style.display = "none";
+                }
+            }
+
+            const hayDatos = _listaAusentes.length > 0 || _listaTarde.length > 0 || _listaSalidas.length > 0 || _listaRetirados.length > 0;
+            resumenContainer.style.display = hayDatos ? "" : "none";
         }
-
         function obtenerAlumnosVisibles() {
             const fCurso = document.getElementById("fCurso").value;
             const fDivision = document.getElementById("fDivision").value;
@@ -1188,7 +1227,7 @@ const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQ
 
             let html = `
                 <div>
-                    ${ (esTarde || a.horaLlegadaTarde) ? `<div class="late-pill">⏰ LLEGÓ TARDE${a.horaLlegadaTarde ? ` — ${escapeHtml(a.horaLlegadaTarde)}` : ''}</div>` : '' }
+                    ${ (esTarde || a.horaLlegadaTarde) ? `<div class="late-pill">⏰ LLEGÓ TARDE${a.horaLlegadaTarde ? ` — ${escapeHtml(formatHora(a.horaLlegadaTarde))}` : ''}</div>` : '' }
                     <span class="nombre">${escapeHtml(a.nombre)}</span>
                     <div class="curso-info">Curso: ${escapeHtml(a.curso) || '-'} ${escapeHtml(a.division) || ''} | DNI: ${escapeHtml(a.dni)}</div>
             `;
@@ -1222,7 +1261,7 @@ const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQ
 
             // Mostrar información de retiro si existe
             if (a.retiroPor) {
-                html += `<div class="retiro-info">Retirado por: ${escapeHtml(a.retiroPor)}${a.horaRetiro ? ` — ${escapeHtml(a.horaRetiro)}` : ''}</div>`;
+                html += `<div class="retiro-info">Retirado por: ${escapeHtml(a.retiroPor)}${a.horaRetiro ? ` — ${escapeHtml(formatHora(a.horaRetiro))}` : ''}</div>`;
             }
             // Mostrar solo el botón "Más" (⋯) que abre el popover con todas las acciones
             html += `
@@ -1941,44 +1980,123 @@ const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQ
             let existente = document.getElementById('popup-lista-modal');
             if (existente) existente.remove();
 
-            const esAusente = tipo === 'ausente';
-            const esSalida = tipo === 'salida';
-            const titulo = esAusente ? '❌ AUSENTES' : esSalida ? '🚪 AFUERA' : '⏰ LLEGADA TARDE';
-            const colorTitulo = esAusente ? 'var(--red, #ef4444)' : esSalida ? 'var(--accent, #0284c7)' : 'var(--orange, #f59e0b)';
+            const esAusente  = tipo === 'ausente';
+            const esSalida   = tipo === 'salida';
+            const esTarde    = tipo === 'tarde';
+            const esRetiro   = tipo === 'retiro';
 
-            const filas = lista.map((a, i) => {
-                let infoExtra = '';
-                if (!esAusente && !esSalida && a.horaLlegadaTarde) {
-                    infoExtra = `<span style="font-size:11px; color:var(--muted); margin-left:6px;">${escapeHtml(a.horaLlegadaTarde)}</span>`;
-                }
-                if (esSalida) {
-                    if (a._causa) infoExtra += `<span style="font-size:11px; background:var(--accent,#0284c7); color:#fff; border-radius:4px; padding:1px 6px; margin-left:6px;">${escapeHtml(a._causa)}</span>`;
-                    if (a._horaSalida) infoExtra += `<span style="font-size:11px; color:var(--muted); margin-left:4px;">${escapeHtml(String(a._horaSalida))}</span>`;
-                }
-                const cursoInfo = a.curso
-                    ? `<span style="font-size:11px; color:var(--muted); margin-left:6px;">${escapeHtml(a.curso)} ${escapeHtml(a.division || '')}</span>`
-                    : '';
-                return `<div style="display:flex; align-items:center; flex-wrap:wrap; gap:4px; padding:8px 0; border-bottom:1px solid var(--border, #e2e8f0);">
-                    <span style="font-size:13px; font-weight:700; color:var(--muted); min-width:22px;">${i + 1}.</span>
-                    <span style="flex:1; font-size:14px; font-weight:600; min-width:120px;">${escapeHtml(a.nombre)}</span>
-                    ${cursoInfo}${infoExtra}
-                </div>`;
-            }).join('');
+            const titulo      = esAusente ? '❌ AUSENTES' : esSalida ? '🚪 AFUERA' : esRetiro ? '👪 RETIRADOS' : '⏰ LLEGADA TARDE';
+            const colorTitulo = esAusente ? 'var(--red,#ef4444)' : esSalida ? 'var(--accent,#0284c7)' : esRetiro ? 'var(--retiro-color,#8b5cf6)' : 'var(--warning,#f59e0b)';
+
+            // Opciones únicas para los filtros
+            const optsUniq = (campo) => [...new Set(lista.map(a => String(a[campo] || '')).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+            const cursos       = optsUniq('curso');
+            const divisiones   = optsUniq('division');
+            const turnos       = optsUniq('turno');
+            const especialidades = optsUniq('especialidad');
+
+            const usuario = usuarioActivo ? (usuarioActivo.nombre || usuarioActivo.usuario || '') : '';
+
+            function buildSelect(id, opts, placeholder) {
+                const ops = opts.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('');
+                return `<select class="pl-filtro-select" id="${id}"><option value="">${placeholder}</option>${ops}</select>`;
+            }
+
+            function renderFilas(listaFiltrada) {
+                if (!listaFiltrada.length) return '<div class="pl-empty">Sin resultados para los filtros aplicados.</div>';
+                return listaFiltrada.map((a, i) => {
+                    const nombre = escapeHtml(a.nombre || '-');
+                    const dni    = escapeHtml(cleanDni(a.dni) || '-');
+                    const curso  = escapeHtml([a.curso, a.division].filter(Boolean).join(' ') || '-');
+                    const turno  = escapeHtml(a.turno || '-');
+                    const esp    = escapeHtml(a.especialidad || '');
+                    const estado = escapeHtml(a.estado || '-');
+
+                    let extras = '';
+                    if (esAusente) {
+                        const horaRetiroFmt = escapeHtml(formatHora(a.horaRetiro));
+                        extras = `<div class="pl-fila-extra">
+                            <span class="pl-tag pl-tag-rojo">Estado: ${estado}</span>
+                            ${a.retiroPor ? `<span class="pl-tag pl-tag-gris">👤 Retiro: ${escapeHtml(a.retiroPor)}</span>` : ''}
+                            ${horaRetiroFmt ? `<span class="pl-tag pl-tag-gris">🕒 ${horaRetiroFmt}</span>` : ''}
+                        </div>`;
+                    }
+                    if (esTarde) {
+                        const horaLlegadaFmt = escapeHtml(formatHora(a.horaLlegadaTarde));
+                        extras = `<div class="pl-fila-extra">
+                            ${horaLlegadaFmt ? `<span class="pl-tag pl-tag-naranja">⏰ Llegada: ${horaLlegadaFmt}</span>` : ''}
+                            <span class="pl-tag pl-tag-gris">Estado: ${estado}</span>
+                        </div>`;
+                    }
+                    if (esSalida) {
+                        const causa    = escapeHtml(a._causa || 'Sin motivo');
+                        const horaFmt  = escapeHtml(formatHora(a._horaSalida));
+                        extras = `<div class="pl-fila-extra">
+                            <span class="pl-tag pl-tag-azul">📍 ${causa}</span>
+                            ${horaFmt ? `<span class="pl-tag pl-tag-gris">🕒 ${horaFmt}</span>` : ''}
+                            ${(a.estado && /TARDE/i.test(a.estado)) ? `<span class="pl-tag pl-tag-naranja">⏰ Llegó tarde</span>` : ''}
+                        </div>`;
+                    }
+                    if (esRetiro) {
+                        const horaRetiroFmt = escapeHtml(formatHora(a.horaRetiro));
+                        extras = `<div class="pl-fila-extra">
+                            <span class="pl-tag pl-tag-retiro">👪 RETIRADO</span>
+                            ${a.retiroPor ? `<span class="pl-tag pl-tag-gris">👤 ${escapeHtml(a.retiroPor)}</span>` : ''}
+                            ${horaRetiroFmt ? `<span class="pl-tag pl-tag-gris">🕒 ${horaRetiroFmt}</span>` : ''}
+                        </div>`;
+                    }
+
+                    return `<div class="pl-fila">
+                        <div class="pl-num">${i + 1}</div>
+                        <div class="pl-info">
+                            <div class="pl-nombre">${nombre}</div>
+                            <div class="pl-meta">
+                                <span>DNI: ${dni}</span>
+                                <span>${curso}</span>
+                                <span>Turno: ${turno}</span>
+                                ${esp ? `<span>${esp}</span>` : ''}
+                            </div>
+                            ${extras}
+                        </div>
+                    </div>`;
+                }).join('');
+            }
 
             const modal = document.createElement('div');
             modal.id = 'popup-lista-modal';
             modal.className = 'custom-modal';
             modal.style.cssText = 'display:flex; z-index:9999;';
             modal.innerHTML = `
-                <div class="custom-modal-content" style="max-width:480px; width:92%; max-height:80vh; display:flex; flex-direction:column;">
-                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
-                        <h3 style="margin:0; color:${colorTitulo}; font-size:16px;">${titulo} <span style="background:${colorTitulo}; color:#fff; border-radius:999px; padding:1px 9px; font-size:13px; margin-left:6px;">${lista.length}</span></h3>
-                        <button onclick="cerrarPopupLista()" style="background:none; border:none; cursor:pointer; font-size:20px; color:var(--muted); line-height:1;" title="Cerrar">✕</button>
+                <div class="custom-modal-content pl-modal-content">
+
+                    <!-- HEADER -->
+                    <div class="pl-header">
+                        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                            <span style="font-size:18px; font-weight:800; color:${colorTitulo};">${titulo}</span>
+                            <span class="pl-count-badge" id="pl-count-visible" style="background:${colorTitulo};">${lista.length}</span>
+                            ${usuario ? `<span class="pl-tag pl-tag-gris" style="font-size:11px;">👤 ${escapeHtml(usuario)}</span>` : ''}
+                        </div>
+                        <button onclick="cerrarPopupLista()" class="pl-close-btn" title="Cerrar">✕</button>
                     </div>
-                    <div style="overflow-y:auto; flex:1; padding-right:4px;">
-                        ${filas || '<p style="text-align:center; color:var(--muted); padding:20px 0;">Sin registros.</p>'}
+
+                    <!-- FILTROS -->
+                    <div class="pl-filtros-bar">
+                        ${cursos.length > 1       ? buildSelect('pl-f-curso',  cursos,       'Curso') : ''}
+                        ${divisiones.length > 1   ? buildSelect('pl-f-div',    divisiones,   'División') : ''}
+                        ${turnos.length > 1        ? buildSelect('pl-f-turno',  turnos,       'Turno') : ''}
+                        ${especialidades.length > 1 ? buildSelect('pl-f-esp',  especialidades,'Especialidad') : ''}
+                        <button class="pl-filtro-clear" id="pl-f-clear" style="display:none;" onclick="plLimpiarFiltros()">✕ Limpiar</button>
                     </div>
-                    <div style="margin-top:14px; text-align:right;">
+
+                    <!-- LISTA -->
+                    <div class="pl-body">
+                        <div class="pl-lista" id="pl-lista-body">
+                            ${renderFilas(lista)}
+                        </div>
+                    </div>
+
+                    <div class="pl-footer">
+                        <span id="pl-footer-count" style="font-size:12px; color:var(--muted);">${lista.length} alumno${lista.length !== 1 ? 's' : ''}</span>
                         <button class="btn-mini azul" onclick="cerrarPopupLista()">Cerrar</button>
                     </div>
                 </div>
@@ -1990,6 +2108,48 @@ const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQ
 
             document.body.appendChild(modal);
             pauseAutoRefresh();
+
+            // Attach filter listeners after DOM insert
+            function plAplicarFiltros() {
+                const vCurso = (document.getElementById('pl-f-curso')  || {}).value || '';
+                const vDiv   = (document.getElementById('pl-f-div')    || {}).value || '';
+                const vTurno = (document.getElementById('pl-f-turno')  || {}).value || '';
+                const vEsp   = (document.getElementById('pl-f-esp')    || {}).value || '';
+                const hayFiltro = vCurso || vDiv || vTurno || vEsp;
+
+                const btnClear = document.getElementById('pl-f-clear');
+                if (btnClear) btnClear.style.display = hayFiltro ? '' : 'none';
+
+                const filtrada = lista.filter(a => {
+                    if (vCurso && String(a.curso || '') !== vCurso) return false;
+                    if (vDiv   && String(a.division || '') !== vDiv) return false;
+                    if (vTurno && String(a.turno || '') !== vTurno) return false;
+                    if (vEsp   && String(a.especialidad || '') !== vEsp) return false;
+                    return true;
+                });
+
+                const body = document.getElementById('pl-lista-body');
+                if (body) body.innerHTML = renderFilas(filtrada);
+
+                const badge = document.getElementById('pl-count-visible');
+                if (badge) badge.textContent = filtrada.length;
+
+                const footer = document.getElementById('pl-footer-count');
+                if (footer) footer.textContent = `${filtrada.length} alumno${filtrada.length !== 1 ? 's' : ''}${hayFiltro ? ' (filtrado)' : ''}`;
+            }
+
+            window.plLimpiarFiltros = function() {
+                ['pl-f-curso','pl-f-div','pl-f-turno','pl-f-esp'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+                plAplicarFiltros();
+            };
+
+            ['pl-f-curso','pl-f-div','pl-f-turno','pl-f-esp'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('change', plAplicarFiltros);
+            });
         }
 
         function cerrarPopupLista() {
@@ -1997,3 +2157,224 @@ const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQ
             if (modal) modal.remove();
             resumeAutoRefresh();
         }
+        /* =========================================================
+           DIRECTIVO — ROL Y HELPERS
+        ========================================================= */
+        function esRolDirectivo(usuario) {
+            if (!usuario) return false;
+            const rol = String(usuario.rol || usuario.cargo || usuario.perfil || '').toUpperCase().trim();
+            return rol === 'DIRECTIVO' || rol === 'DIRECTOR' || rol === 'DIRECTORA' ||
+                   rol === 'VICE' || rol === 'VICEDIRECTOR' || rol === 'VICEDIRECTORA' ||
+                   rol === 'ADMINISTRADOR' || rol === 'ADMIN';
+        }
+
+        /* =========================================================
+           PANEL DE ALERTAS ACTIVAS
+        ========================================================= */
+        function actualizarAlertas() {
+            const lista = document.getElementById('alertas-lista');
+            const badge = document.getElementById('alertas-badge');
+            if (!lista) return;
+
+            const alertas = [];
+            const ahora = new Date();
+
+            alumnos.forEach(a => {
+                const regSalida = obtenerRegistroSalida(a);
+
+                // Alerta: tiempo de baño excedido (> 15 min)
+                if (regSalida) {
+                    const causa = obtenerPropiedadSalida(regSalida, ['causa', 'destino', 'motivo', 'lugar']) || '';
+                    if (esSalidaConCronometro(causa)) {
+                        const fechaSalida = parsearFechaGAS(detectarFechaSalida(regSalida));
+                        const minutos = Math.floor((ahora - fechaSalida) / 60000);
+                        if (minutos >= 15) {
+                            alertas.push({
+                                tipo: 'tiempo',
+                                icono: '🚨',
+                                colorClass: 'alerta-roja',
+                                titulo: `Tiempo excedido — ${escapeHtml(a.nombre)}`,
+                                detalle: `${escapeHtml([a.curso, a.division].filter(Boolean).join(' '))} · Lleva <strong>${minutos} min</strong> en baño`,
+                                turno: a.turno || ''
+                            });
+                        } else if (minutos >= 12) {
+                            alertas.push({
+                                tipo: 'tiempo',
+                                icono: '⚠️',
+                                colorClass: 'alerta-naranja',
+                                titulo: `Por exceder tiempo — ${escapeHtml(a.nombre)}`,
+                                detalle: `${escapeHtml([a.curso, a.division].filter(Boolean).join(' '))} · Lleva <strong>${minutos} min</strong> en baño`,
+                                turno: a.turno || ''
+                            });
+                        }
+                    }
+                }
+
+                // Alerta: ausentes sin justificar
+                if (String(a.estado || '').toUpperCase() === 'AUSENTE') {
+                    alertas.push({
+                        tipo: 'ausente',
+                        icono: '❌',
+                        colorClass: 'alerta-roja',
+                        titulo: `Ausente — ${escapeHtml(a.nombre)}`,
+                        detalle: `${escapeHtml([a.curso, a.division].filter(Boolean).join(' '))} · ${escapeHtml(a.turno || '')}`,
+                        turno: a.turno || ''
+                    });
+                }
+
+                // Alerta: alumnos afuera con salida autorizada (más de 30 min)
+                if (regSalida) {
+                    const causa = obtenerPropiedadSalida(regSalida, ['causa', 'destino', 'motivo', 'lugar']) || '';
+                    if (/autorizada|enfermería|emergencia/i.test(causa)) {
+                        const fechaSalida = parsearFechaGAS(detectarFechaSalida(regSalida));
+                        const minutos = Math.floor((ahora - fechaSalida) / 60000);
+                        if (minutos >= 30) {
+                            alertas.push({
+                                tipo: 'salida-larga',
+                                icono: '📍',
+                                colorClass: 'alerta-azul',
+                                titulo: `Salida prolongada — ${escapeHtml(a.nombre)}`,
+                                detalle: `${escapeHtml([a.curso, a.division].filter(Boolean).join(' '))} · <strong>${escapeHtml(causa)}</strong> hace ${minutos} min`,
+                                turno: a.turno || ''
+                            });
+                        }
+                    }
+                }
+            });
+
+            if (badge) badge.textContent = alertas.length;
+            if (badge) badge.style.background = alertas.length > 0 ? 'var(--red)' : 'var(--green)';
+
+            if (alertas.length === 0) {
+                lista.innerHTML = '<div class="alertas-empty">Sin alertas activas ✅</div>';
+                return;
+            }
+
+            // Ordenar: rojas primero
+            const orden = { 'alerta-roja': 0, 'alerta-naranja': 1, 'alerta-azul': 2 };
+            alertas.sort((a, b) => (orden[a.colorClass] || 9) - (orden[b.colorClass] || 9));
+
+            lista.innerHTML = alertas.map(al => `
+                <div class="alerta-item ${al.colorClass}">
+                    <span class="alerta-icono">${al.icono}</span>
+                    <div class="alerta-info">
+                        <div class="alerta-nombre">${al.titulo}</div>
+                        <div class="alerta-detalle">${al.detalle}</div>
+                    </div>
+                    ${al.turno ? `<span class="alerta-turno">${escapeHtml(al.turno)}</span>` : ''}
+                </div>
+            `).join('');
+        }
+
+        /* =========================================================
+           DASHBOARD GLOBAL POR CURSO
+        ========================================================= */
+        function actualizarFiltrosDashboard() {
+            const turnos = [...new Set(alumnos.map(a => a.turno).filter(Boolean))].sort();
+            const especialidades = [...new Set(alumnos.map(a => a.especialidad).filter(Boolean))].sort();
+
+            const selTurno = document.getElementById('dashboard-filtro-turno');
+            const selEsp = document.getElementById('dashboard-filtro-esp');
+            if (!selTurno || !selEsp) return;
+
+            const vt = selTurno.value;
+            const ve = selEsp.value;
+
+            selTurno.innerHTML = '<option value="">Todos los turnos</option>' +
+                turnos.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+            selEsp.innerHTML = '<option value="">Todas las especialidades</option>' +
+                especialidades.map(e => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`).join('');
+
+            if (turnos.includes(vt)) selTurno.value = vt;
+            if (especialidades.includes(ve)) selEsp.value = ve;
+        }
+
+        function actualizarDashboard() {
+            const grid = document.getElementById('dashboard-grid');
+            if (!grid) return;
+
+            const filtroTurno = (document.getElementById('dashboard-filtro-turno') || {}).value || '';
+            const filtroEsp   = (document.getElementById('dashboard-filtro-esp')   || {}).value || '';
+
+            // Agrupar alumnos por curso+división
+            const grupos = {};
+            alumnos.forEach(a => {
+                if (filtroTurno && a.turno !== filtroTurno) return;
+                if (filtroEsp && a.especialidad !== filtroEsp) return;
+
+                const key = `${a.curso || '?'}|${a.division || '?'}|${a.turno || ''}|${a.especialidad || ''}`;
+                if (!grupos[key]) grupos[key] = { curso: a.curso, division: a.division, turno: a.turno, especialidad: a.especialidad, alumnos: [] };
+                grupos[key].alumnos.push(a);
+            });
+
+            const keys = Object.keys(grupos).sort((a, b) => {
+                const ga = grupos[a], gb = grupos[b];
+                const t = String(ga.turno || '').localeCompare(String(gb.turno || ''), 'es');
+                if (t !== 0) return t;
+                const c = String(ga.curso || '').localeCompare(String(gb.curso || ''), 'es');
+                if (c !== 0) return c;
+                return String(ga.division || '').localeCompare(String(gb.division || ''), 'es');
+            });
+
+            if (keys.length === 0) {
+                grid.innerHTML = '<div style="color:var(--muted); font-size:13px; padding:20px;">No hay cursos para mostrar con estos filtros.</div>';
+                return;
+            }
+
+            grid.innerHTML = keys.map(key => {
+                const g = grupos[key];
+                const total    = g.alumnos.length;
+                const ausentes = g.alumnos.filter(a => String(a.estado || '').toUpperCase() === 'AUSENTE').length;
+                const afuera   = g.alumnos.filter(a => String(a.estado || '').toUpperCase() !== 'AUSENTE' && !!obtenerRegistroSalida(a)).length;
+                const tarde    = g.alumnos.filter(a => /TARDE/i.test(String(a.estado || '')) && String(a.estado || '').toUpperCase() !== 'AUSENTE').length;
+                const aula     = total - ausentes - afuera;
+                const pctAula  = total > 0 ? Math.round((aula / total) * 100) : 0;
+
+                // Barra de ocupación visual
+                const pctAfuera  = total > 0 ? (afuera  / total) * 100 : 0;
+                const pctAusente = total > 0 ? (ausentes / total) * 100 : 0;
+                const pctAula2   = Math.max(0, 100 - pctAfuera - pctAusente);
+
+                const labelCurso = [g.curso, g.division].filter(Boolean).join(' ');
+                const subLabel   = [g.turno, g.especialidad].filter(Boolean).join(' · ');
+
+                const alertaClase = ausentes > 0 || afuera > 2 ? 'dash-card-alerta' : '';
+
+                return `<div class="dash-card ${alertaClase}">
+                    <div class="dash-card-top">
+                        <div>
+                            <div class="dash-curso">${escapeHtml(labelCurso)}</div>
+                            ${subLabel ? `<div class="dash-sub">${escapeHtml(subLabel)}</div>` : ''}
+                        </div>
+                        <div class="dash-total-badge">${total}</div>
+                    </div>
+                    <div class="dash-barra">
+                        <div class="dash-barra-aula"   style="width:${pctAula2.toFixed(1)}%"   title="En aula"></div>
+                        <div class="dash-barra-afuera" style="width:${pctAfuera.toFixed(1)}%"  title="Afuera"></div>
+                        <div class="dash-barra-ausente" style="width:${pctAusente.toFixed(1)}%" title="Ausente"></div>
+                    </div>
+                    <div class="dash-stats">
+                        <div class="dash-stat dash-stat-aula">
+                            <strong>${aula}</strong><span>en aula</span>
+                        </div>
+                        <div class="dash-stat dash-stat-afuera">
+                            <strong>${afuera}</strong><span>afuera</span>
+                        </div>
+                        <div class="dash-stat dash-stat-ausente">
+                            <strong>${ausentes}</strong><span>ausentes</span>
+                        </div>
+                        ${tarde > 0 ? `<div class="dash-stat dash-stat-tarde"><strong>${tarde}</strong><span>tarde</span></div>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        // Hook en render() para actualizar dashboard y alertas si el directivo está logueado
+        const _renderOriginal = render;
+        render = function() {
+            _renderOriginal();
+            if (usuarioActivo && esRolDirectivo(usuarioActivo)) {
+                actualizarDashboard();
+                actualizarAlertas();
+            }
+        };
