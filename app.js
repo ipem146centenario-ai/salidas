@@ -1,5 +1,8 @@
 
-        const URL = "https://script.google.com/macros/s/AKfycbyayX83bhc4VbTCDIsI79u_E-B7_XRdcXw4EBLjptPA3K1n8FqOokQKp0oOVDKKqahg/exec";
+        const URL = "https://script.google.com/macros/s/AKfycbyQ8IvEWgpl5Vj--Zal4-144FBQEtB3Mkpm-zcAISK33iW28peCTELMkqwlo6qJ1fnc/exec";
+        // Si querés validar las peticiones desde el servidor, pon aquí el mismo secret que en GAS.
+        // Dejar como 'REPLACE_WITH_SECRET' para no enviar secret.
+        const CLIENT_SECRET = 'REPLACE_WITH_SECRET';
 
         let alumnos = [];
         let docentes = [];
@@ -13,6 +16,10 @@
         let isRefreshing = false;
         let ultimoHashDatos = null;
         let ultimoActualizado = null;
+        let sharedAudioCtx = null; // Reusar AudioContext
+        let pendingRequests = [];
+        let queueTimer = null;
+        let queueProcessing = false;
 
         /* =========================================================
            INIT
@@ -114,6 +121,30 @@
             return '{' + keys.map(key => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';
         }
 
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return "";
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function formatDateField(val) {
+            if (!val && val !== 0) return '';
+            // si ya contiene '/', asumir formato dd/MM/yyyy o similar y devolver tal cual
+            if (typeof val === 'string' && val.indexOf('/') !== -1) return val;
+            // si es número (timestamp) convertir
+            if (typeof val === 'number') return new Date(val).toLocaleString();
+            // intentar parsear ISO o string reconocible
+            try {
+                const d = new Date(val);
+                if (!isNaN(d.getTime())) return d.toLocaleString();
+            } catch (e) { /* ignore */ }
+            return String(val);
+        }
+
         /* =========================================================
            DIALOGOS Y MODALES PERSONALIZADOS
         ========================================================= */
@@ -144,6 +175,323 @@
                     resolve(false);
                 };
             });
+        }
+
+        // Modal para pedir nombre del tutor/padre (reemplaza prompt)
+        function mostrarModalTutor(nombreAlumno) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('tutor-modal');
+                const input = document.getElementById('tutor-name-input');
+                const error = document.getElementById('tutor-name-error');
+                const btnOk = document.getElementById('tutor-modal-btn-ok');
+                const btnCancel = document.getElementById('tutor-modal-btn-cancel');
+                const title = document.getElementById('tutor-modal-title');
+
+                if (!modal || !input || !btnOk || !btnCancel) {
+                    resolve(null);
+                    return;
+                }
+
+                title.textContent = `Retiro de ${nombreAlumno}`;
+                input.value = '';
+                error.style.display = 'none';
+                // pause auto-refresh while modal is open
+                pauseAutoRefresh();
+                modal.style.display = 'flex';
+                setTimeout(() => input.focus(), 50);
+
+                function cleanup() {
+                    modal.style.display = 'none';
+                    btnOk.onclick = null;
+                    btnCancel.onclick = null;
+                }
+
+                btnCancel.onclick = () => {
+                    cleanup();
+                    resolve(null);
+                };
+
+                btnOk.onclick = () => {
+                    const val = input.value.trim();
+                    if (!val) {
+                        error.style.display = 'block';
+                        input.focus();
+                        return;
+                    }
+                    cleanup();
+                    resolve(val);
+                };
+                function cleanup() {
+                    modal.style.display = 'none';
+                    btnOk.onclick = null;
+                    btnCancel.onclick = null;
+                    // resume auto-refresh after modal closes
+                    resumeAutoRefresh();
+                }
+            });
+        }
+
+        // Modal para seleccionar estado (AUSENTE / LLEGADA TARDE / RETIRO / PRESENTE)
+        function mostrarModalEstado(nombreAlumno) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('estado-modal');
+                const title = document.getElementById('estado-modal-title');
+                const btnAusente = document.getElementById('estado-btn-ausente');
+                const btnTarde = document.getElementById('estado-btn-tarde');
+                const btnRetiro = document.getElementById('estado-btn-retiro');
+                const btnPresente = document.getElementById('estado-btn-presente');
+                const btnCancel = document.getElementById('estado-modal-btn-cancel');
+
+                if (!modal) { resolve(null); return; }
+
+                title.textContent = `Cambiar estado — ${nombreAlumno}`;
+                // Pause auto-refresh while modal open
+                pauseAutoRefresh();
+                modal.style.display = 'flex';
+
+                function cleanup() {
+                    modal.style.display = 'none';
+                    btnAusente.onclick = null;
+                    btnTarde.onclick = null;
+                    btnRetiro.onclick = null;
+                    btnPresente.onclick = null;
+                    btnCancel.onclick = null;
+                    // resume auto-refresh
+                    resumeAutoRefresh();
+                }
+
+                btnCancel.onclick = () => { cleanup(); resolve(null); };
+                btnAusente.onclick = () => { cleanup(); resolve('AUSENTE'); };
+                btnTarde.onclick = () => { cleanup(); resolve('LLEGADA TARDE'); };
+                btnRetiro.onclick = () => { cleanup(); resolve('RETIRO PADRE/TUTOR'); };
+                btnPresente.onclick = () => { cleanup(); resolve('PRESENTE'); };
+                const btnSalida = document.getElementById('estado-btn-salida');
+                const btnRegreso = document.getElementById('estado-btn-regreso');
+                if (btnSalida) btnSalida.onclick = () => { cleanup(); resolve('SALIDA'); };
+                if (btnRegreso) btnRegreso.onclick = () => { cleanup(); resolve('REGRESO'); };
+            });
+        }
+
+        // POPOVER: show contextual menu anchored to a button
+        let popoverVisible = false;
+        let popoverOutsideHandler = null;
+        let popoverAnchorBtn = null;
+        let popoverKeyHandler = null;
+
+        function openPopoverForButton(btn, dni) {
+            const pop = document.getElementById('popover-menu');
+            if (!pop) return;
+            const rect = btn.getBoundingClientRect();
+            // position popover below the button, adjust if near edges
+            const margin = 8;
+            pop.style.display = 'block';
+            // pause auto-refresh while popover open
+            pauseAutoRefresh();
+            pop.classList.remove('visible');
+
+            // small delay to allow size measurement
+            requestAnimationFrame(() => {
+                const popRect = pop.getBoundingClientRect();
+                let left = rect.left + (rect.width/2) - (popRect.width/2);
+                let top = rect.bottom + margin;
+                if (left < 8) left = 8;
+                if (left + popRect.width > window.innerWidth - 8) left = window.innerWidth - popRect.width - 8;
+                if (top + popRect.height > window.innerHeight - 8) top = rect.top - popRect.height - margin;
+                pop.style.left = `${left}px`;
+                pop.style.top = `${top}px`;
+                pop.dataset.dni = dni || '';
+                // set dni on each popover item
+                pop.querySelectorAll('.popover-item').forEach(item => {
+                    item.dataset.dni = dni || '';
+                });
+                pop.classList.add('visible');
+                popoverVisible = true;
+                popoverAnchorBtn = btn;
+                try { btn.setAttribute('aria-expanded', 'true'); } catch(e){}
+
+                // focus first item for accessibility
+                const items = Array.from(pop.querySelectorAll('.popover-item'));
+                if (items.length) {
+                    items.forEach(it => it.setAttribute('role', 'menuitem'));
+                    // programmatic focus
+                    items[0].tabIndex = -1;
+                    items[0].focus();
+                }
+
+                // attach outside click handler
+                popoverOutsideHandler = (ev) => {
+                    if (!pop.contains(ev.target) && !btn.contains(ev.target)) hidePopover();
+                };
+                document.addEventListener('click', popoverOutsideHandler);
+                document.addEventListener('keydown', popoverEscHandler);
+
+                // keyboard navigation inside popover (Arrow keys + Enter)
+                popoverKeyHandler = (ev) => {
+                    if (!popoverVisible) return;
+                    const items = Array.from(pop.querySelectorAll('.popover-item'));
+                    if (!items.length) return;
+                    const idx = items.indexOf(document.activeElement);
+                    if (ev.key === 'ArrowDown') {
+                        ev.preventDefault();
+                        const next = items[(idx + 1) % items.length]; next.focus();
+                    } else if (ev.key === 'ArrowUp') {
+                        ev.preventDefault();
+                        const prev = items[(idx - 1 + items.length) % items.length]; prev.focus();
+                    } else if (ev.key === 'Home') {
+                        ev.preventDefault(); items[0].focus();
+                    } else if (ev.key === 'End') {
+                        ev.preventDefault(); items[items.length - 1].focus();
+                    } else if (ev.key === 'Enter' || ev.key === ' ') {
+                        // let click handler process it
+                        ev.preventDefault(); document.activeElement.click();
+                    }
+                };
+                document.addEventListener('keydown', popoverKeyHandler);
+            });
+        }
+
+        // Pause auto-refresh while modals or popover are open
+        function pauseAutoRefresh() {
+            detenerAutoActualizacion();
+        }
+        function resumeAutoRefresh() {
+            iniciarAutoActualizacion();
+        }
+
+        function popoverEscHandler(e) {
+            if (e.key === 'Escape') hidePopover();
+        }
+
+        function hidePopover() {
+            const pop = document.getElementById('popover-menu');
+            if (!pop) return;
+            pop.classList.remove('visible');
+            pop.style.display = 'none';
+            pop.dataset.dni = '';
+            pop.querySelectorAll('.popover-item').forEach(item => delete item.dataset.dni);
+            popoverVisible = false;
+            if (popoverOutsideHandler) {
+                document.removeEventListener('click', popoverOutsideHandler);
+                popoverOutsideHandler = null;
+            }
+            document.removeEventListener('keydown', popoverEscHandler);
+            if (popoverKeyHandler) {
+                document.removeEventListener('keydown', popoverKeyHandler);
+                popoverKeyHandler = null;
+            }
+            if (popoverAnchorBtn) {
+                try { popoverAnchorBtn.removeAttribute('aria-expanded'); } catch(e){}
+                try { popoverAnchorBtn.focus(); } catch(e){}
+                popoverAnchorBtn = null;
+            }
+            // resume auto-refresh when popover closes
+            resumeAutoRefresh();
+        }
+
+        // Handle clicks on popover items (delegate)
+        document.addEventListener('click', function(e) {
+            const pop = document.getElementById('popover-menu');
+            if (!pop) return;
+            const item = e.target.closest('.popover-item');
+            if (!item || !pop.contains(item)) return;
+            const action = item.dataset.action;
+            const dni = item.dataset.dni;
+            const accion = item.dataset.accion;
+            hidePopover();
+            if (action === 'registrarSalida') {
+                registrarSalida(dni);
+            } else if (action === 'registrarRegreso') {
+                registrarRegreso(dni);
+            } else if (action === 'limpiarHoraTarde') {
+                limpiarHoraLlegada(dni);
+            } else if (action === 'preceptor') {
+                cambiarEstadoPreceptor(dni, accion);
+            }
+        });
+
+        async function limpiarHoraLlegada(dni) {
+            const alumno = alumnos.find(a => cleanDni(a.dni) === cleanDni(dni));
+            if (!alumno) return;
+            const confirmar = await mostrarConfirmacion('Limpiar hora', `¿Borrar la hora de llegada tarde de ${alumno.nombre}?`);
+            if (!confirmar) return;
+            // borrar localmente
+            alumno.horaLlegadaTarde = '';
+            // enviar al servidor para sincronizar
+            const payload = {
+                tipoAccion: 'limpiarHoraLlegada',
+                dni: cleanDni(alumno.dni),
+                nombre: alumno.nombre,
+                docente: usuarioActivo ? (usuarioActivo.nombre || usuarioActivo.usuario) : ''
+            };
+            const result = await enviarTransaccionPost(payload);
+            if (result && result.queued) {
+                showToast('Petición encolada: la hora se limpiará cuando haya conexión.');
+            } else {
+                showToast('Hora de llegada tardea borrada.');
+            }
+            historial.push({
+                fechahora: new Date().toLocaleString(),
+                alumno: alumno.nombre,
+                accion: 'LIMPIAR HORA TARDE',
+                usuario: usuarioActivo ? (usuarioActivo.nombre || usuarioActivo.usuario) : 'Sistema',
+                detalle: '',
+                tipoAccion: 'preceptor',
+                tipo: '',
+                dni: cleanDni(alumno.dni),
+                docente: usuarioActivo ? (usuarioActivo.nombre || usuarioActivo.usuario) : '',
+                estado: alumno.estado || '',
+                horaLlegadaTarde: alumno.horaLlegadaTarde || '',
+                quienRetira: alumno.retiroPor || '',
+                horaRetiro: alumno.horaRetiro || '',
+                queued: false
+            });
+            actualizarTarjetaAlumno(alumno);
+            renderHistorial();
+            actualizarContadores();
+        }
+
+        // SVG icon helpers
+        function svgDoor() {
+            return `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M3 21V3h12v18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M21 7v14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M18 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" fill="currentColor"/>
+            </svg>`;
+        }
+        function svgReturn() {
+            return `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M3 13l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>`;
+        }
+        function svgCross() {
+            return `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>`;
+        }
+        function svgClock() {
+            return `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M12 7v6l4 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>`;
+        }
+        function svgFamily() {
+            return `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M16 11a3 3 0 1 0-6 0" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M6 21v-2a4 4 0 0 1 4-4h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M18 21v-2a2 2 0 0 0-2-2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>`;
+        }
+        function svgCheck() {
+            return `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>`;
         }
 
         function showToast(message, type = "success") {
@@ -185,17 +533,28 @@
 
         function obtenerPropiedadSalida(reg, posiblesNombres) {
             if (!reg) return "";
-            for (let nombre of posiblesNombres) {
-                const normalized = nombre.toLowerCase().trim();
-                if (reg[normalized] !== undefined && reg[normalized] !== null) {
-                    return reg[normalized];
+            // Construir mapa de claves normalizadas para búsquedas robustas
+            const mapa = {};
+            for (let key in reg) {
+                try {
+                    const k = String(key).toLowerCase().trim();
+                    mapa[k] = reg[key];
+                } catch (e) {
+                    mapa[key] = reg[key];
                 }
             }
-            for (let key in reg) {
-                const keyLower = key.toLowerCase().trim();
+
+            for (let nombre of posiblesNombres) {
+                const normalized = String(nombre).toLowerCase().trim();
+                if (mapa[normalized] !== undefined && mapa[normalized] !== null) {
+                    return mapa[normalized];
+                }
+            }
+
+            for (let key in mapa) {
                 for (let nombre of posiblesNombres) {
-                    if (keyLower.includes(nombre.toLowerCase().trim())) {
-                        return reg[key];
+                    if (key.includes(String(nombre).toLowerCase().trim())) {
+                        return mapa[key];
                     }
                 }
             }
@@ -241,7 +600,8 @@
             } else {
                 mostrarIndicadorActualizacion(true);
             }
-            document.getElementById("cors-helper-panel").style.display = "none";
+            const corsPanel = document.getElementById("cors-helper-panel");
+            if (corsPanel) corsPanel.style.display = "none";
             
             try {
                 const response = await fetch(URL + "?_ts=" + Date.now(), {
@@ -278,15 +638,35 @@
 
                 // Normalización inteligente de los alumnos para evitar incompatibilidades de acentos de cabecera
                 const rawAlumnos = data.alumnos || [];
-                alumnos = rawAlumnos.map(a => ({
-                    dni: obtenerPropiedadAlumno(a, ['dni']),
-                    nombre: obtenerPropiedadAlumno(a, ['nombre', 'nombre y apellido', 'estudiante']),
-                    curso: obtenerPropiedadAlumno(a, ['curso', 'año', 'ano']),
-                    division: obtenerPropiedadAlumno(a, ['division', 'división', 'div']),
-                    turno: obtenerPropiedadAlumno(a, ['turno']),
-                    especialidad: obtenerPropiedadAlumno(a, ['especialidad', 'orientacion', 'orientación']),
-                    estado: obtenerPropiedadAlumno(a, ['estado', 'asistencia'])
-                }));
+                // Mantener campos locales (como horaLlegadaTarde) si existen en la sesión
+                alumnos = rawAlumnos.map(a => {
+                    const dniVal = obtenerPropiedadAlumno(a, ['dni']);
+                    const nombreVal = obtenerPropiedadAlumno(a, ['nombre', 'nombre y apellido', 'estudiante']);
+                    const cursoVal = obtenerPropiedadAlumno(a, ['curso', 'año', 'ano']);
+                    const divisionVal = obtenerPropiedadAlumno(a, ['division', 'división', 'div']);
+                    const turnoVal = obtenerPropiedadAlumno(a, ['turno']);
+                    const espVal = obtenerPropiedadAlumno(a, ['especialidad', 'orientacion', 'orientación']);
+                    const estadoVal = obtenerPropiedadAlumno(a, ['estado', 'asistencia']);
+
+                    const existing = (alumnos || []).find(e => cleanDni(e.dni) === cleanDni(dniVal));
+
+                    // Priorizar valor remoto si existe, sino conservar el local (horaLlegadaTarde)
+                    const horaRemota = obtenerPropiedadAlumno(a, ['horaLlegadaTarde', 'hora llegada', 'horaLlegada', 'hora']);
+                    const horaLlegadaTardeFinal = horaRemota ? horaRemota : (existing ? existing.horaLlegadaTarde : '');
+
+                    return {
+                        dni: dniVal,
+                        nombre: nombreVal,
+                        curso: cursoVal,
+                        division: divisionVal,
+                        turno: turnoVal,
+                        especialidad: espVal,
+                        estado: estadoVal,
+                        horaLlegadaTarde: horaLlegadaTardeFinal,
+                        retiroPor: existing ? existing.retiroPor : undefined,
+                        horaRetiro: existing ? existing.horaRetiro : undefined
+                    };
+                });
 
                 docentes = data.docentes || [];
                 salidas = data.salidas || [];
@@ -302,7 +682,8 @@
                 }
             } catch (error) {
                 console.error("Error al cargar datos:", error);
-                document.getElementById("cors-helper-panel").style.display = "block";
+                const corsPanelErr = document.getElementById("cors-helper-panel");
+                if (corsPanelErr) corsPanelErr.style.display = "block";
                 showToast("Error de conexión. Revisa las instrucciones en pantalla.", "error");
             } finally {
                 if (!silent) {
@@ -324,6 +705,7 @@
 
         function actualizarSelectorDocentes() {
             const select = document.getElementById("docentes");
+            if (!select) return;
             select.innerHTML = '<option value="">Seleccione Usuario...</option>';
             
             docentes.forEach(d => {
@@ -349,6 +731,7 @@
 
         function cargarOpcionesFiltro(id, lista, porDefecto) {
             const select = document.getElementById(id);
+            if (!select) return;
             const valAnterior = select.value;
             select.innerHTML = `<option value="">-- ${porDefecto} --</option>`;
             lista.forEach(item => {
@@ -398,7 +781,8 @@
                     
                     document.getElementById("logoutBtn").style.display = "block";
                     passInput.value = "";
-                    render();
+                    // refresh data from server so new user sees latest horarios/estados
+                    cargarDatos(true).then(() => render()).catch(() => render());
                 } else {
                     showToast("PIN incorrecto.", "error");
                     const inputEl = document.getElementById("passDocente");
@@ -454,10 +838,11 @@
 
         function reproducirAlarmaOscilador() {
             try {
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                if (audioCtx.state === 'suspended') {
-                    audioCtx.resume();
+                if (!sharedAudioCtx) {
+                    sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 }
+                const audioCtx = sharedAudioCtx;
+                if (audioCtx.state === 'suspended') audioCtx.resume();
                 
                 const playBeep = (delay, frequency, duration) => {
                     const osc = audioCtx.createOscillator();
@@ -513,6 +898,8 @@
             const dniLimpio = cleanDni(alumno.dni);
             const div = document.createElement("div");
             div.id = `alumno-${dniLimpio}`;
+            div.dataset.dni = dniLimpio;
+            div.dataset.nombre = alumno.nombre || '';
             const { html, estadoClase } = construirTarjetaAlumnoHTML(alumno, regSalida);
             div.className = `alumno ${estadoClase}`;
             div.innerHTML = html;
@@ -564,6 +951,46 @@
                 }
 
                 grid.appendChild(cardEl);
+
+                // Añadir listener delegado por tarjeta para botones (evita handlers inline)
+                if (!cardEl.dataset.listenerAttached) {
+                    cardEl.addEventListener('click', async function(e) {
+                        const btn = e.target.closest('button');
+                        if (btn) {
+                            const action = btn.dataset.action;
+                            const dniBtn = btn.dataset.dni;
+                            if (!action) return;
+
+                            if (action === 'registrarSalida') {
+                                registrarSalida(dniBtn);
+                            } else if (action === 'registrarRegreso') {
+                                registrarRegreso(dniBtn);
+                            } else if (action === 'openPopover') {
+                                e.stopPropagation();
+                                openPopoverForButton(btn, dniBtn);
+                            } else if (action === 'preceptor') {
+                                const accion = btn.dataset.accion;
+                                cambiarEstadoPreceptor(dniBtn, accion);
+                            }
+                        } else {
+                            // Click en tarjeta (no en botón): abrir modal de cambio de estado si es preceptor
+                            const esPreceptor = usuarioActivo && (String(usuarioActivo.rol || usuarioActivo.cargo || "").toUpperCase() === "PRECEPTOR");
+                            if (!esPreceptor) return;
+                            const dniCard = this.dataset.dni;
+                            const nombreCard = this.dataset.nombre || '';
+                            const seleccion = await mostrarModalEstado(nombreCard);
+                            if (!seleccion) return;
+                            if (seleccion === 'SALIDA') {
+                                registrarSalida(dniCard);
+                            } else if (seleccion === 'REGRESO') {
+                                registrarRegreso(dniCard);
+                            } else {
+                                cambiarEstadoPreceptor(dniCard, seleccion);
+                            }
+                        }
+                    });
+                    cardEl.dataset.listenerAttached = '1';
+                }
 
                 if (regSalida) {
                     const causaSalida = obtenerPropiedadSalida(regSalida, ['causa', 'destino', 'motivo', 'lugar']) || "";
@@ -634,7 +1061,7 @@
             let estadoClase = "in";
             let textoEstado = "🟢 EN AULA";
             const esAusente = String(a.estado || "").toUpperCase() === "AUSENTE";
-            const esTarde = String(a.estado || "").toUpperCase() === "TARDE";
+            const esTarde = /TARDE/i.test(String(a.estado || ""));
             const esRetiro = String(a.estado || "").toUpperCase() === "RETIRO";
 
             // Determinar clase de estado para la tarjeta
@@ -664,29 +1091,25 @@
 
             let html = `
                 <div>
-                    ${esTarde ? `<div class="badge-tarde">⏰ TARDE${a.horaLlegadaTarde ? ` - ${a.horaLlegadaTarde}` : ''}</div>` : ''}
-                    <span class="nombre">${a.nombre}</span>
-                    <div class="curso-info">Curso: ${a.curso || '-'} ${a.division || ''} | DNI: ${a.dni}</div>
+                    ${ (esTarde || a.horaLlegadaTarde) ? `<div class="late-pill">⏰ LLEGÓ TARDE${a.horaLlegadaTarde ? ` — ${escapeHtml(a.horaLlegadaTarde)}` : ''}</div>` : '' }
+                    <span class="nombre">${escapeHtml(a.nombre)}</span>
+                    <div class="curso-info">Curso: ${escapeHtml(a.curso) || '-'} ${escapeHtml(a.division) || ''} | DNI: ${escapeHtml(a.dni)}</div>
             `;
 
-            // Mostrar estado
+            // Mostrar estado (las badges CSS ya indican RETIRADO/AUSENTE)
             if (esAusente) {
-                html += `<div class="label-ausente">${textoEstado}</div>`;
+                // Badge visually indicates AUSENTE; no duplicate label
             } else if (esRetiro) {
-                html += `<div class="estado-retiro">${textoEstado}</div>`;
-            } else if (esTarde && !regSalida) {
-                html += `<div class="label-tarde">${textoEstado}</div>`;
-                if (a.horaLlegadaTarde) {
-                    html += `<div class="hora-llegada-tarde">🕐 Llegó a las ${a.horaLlegadaTarde}</div>`;
-                }
+                // Badge visually indicates RETIRADO; no duplicate label
+            } else if (esTarde) {
+                // Late indicator handled by single .late-pill element above
             } else if (regSalida) {
                 const causaDestino = obtenerPropiedadSalida(regSalida, ['causa', 'destino', 'motivo', 'lugar']) || "Salida";
                 const mostrarTimer = esSalidaConCronometro(causaDestino);
                 const badgeTipo = mostrarTimer ? 'timed' : 'not-timed';
                 const badgeTexto = mostrarTimer ? 'Cronómetro activo' : 'Salida sin cronómetro';
-
-                html += `<div class="motivo-destacado">${textoEstado}</div>`;
-                html += `<div class="causa-badge ${badgeTipo}">${badgeTexto}</div>`;
+                html += `<div class="motivo-destacado">${escapeHtml(textoEstado)}</div>`;
+                html += `<div class="causa-badge ${badgeTipo}">${escapeHtml(badgeTexto)}</div>`;
                 if (mostrarTimer) {
                     html += `
                         <div class="timer-box" id="timer-${cleanDni(a.dni)}">🕒 Calculando...</div>
@@ -696,49 +1119,22 @@
                 }
             } else {
                 html += `
-                    <div class="estado-aula">${textoEstado}</div>
+                    <div class="estado-aula">${escapeHtml(textoEstado)}</div>
                 `;
             }
 
-            // Mostrar botones de acción (salida/regreso para todos excepto AUSENTE y RETIRO)
-            if (regSalida) {
-                html += `
-                    <button class="btn-card regreso" onclick="registrarRegreso('${a.dni}')">
-                        REGISTRAR REGRESO
-                    </button>
-                `;
-            } else if (!esAusente && !esRetiro) {
-                html += `
-                    <button class="btn-card" onclick="registrarSalida('${a.dni}')">
-                        REGISTRAR SALIDA
-                    </button>
-                `;
+            // Mostrar información de retiro si existe
+            if (a.retiroPor) {
+                html += `<div class="retiro-info">Retirado por: ${escapeHtml(a.retiroPor)}${a.horaRetiro ? ` — ${escapeHtml(a.horaRetiro)}` : ''}</div>`;
             }
+            // Mostrar solo el botón "Más" (⋯) que abre el popover con todas las acciones
+            html += `
+                <div class="card-actions" style="margin-top:12px; display:flex; justify-content:flex-end;">
+                    <button class="more-btn" data-action="openPopover" data-dni="${escapeHtml(a.dni)}" title="Más acciones" aria-label="Más acciones" aria-expanded="false">⋯</button>
+                </div>
+            `;
 
-            // Opciones de preceptor
-            const esPreceptor = String(usuarioActivo.rol || usuarioActivo.cargo || "").toUpperCase() === "PRECEPTOR" || true;
-            if (esPreceptor && !esAusente && !esRetiro && !regSalida) {
-                html += `
-                    <div class="acciones-preceptor">
-                        <button class="btn-mini rojo" onclick="cambiarEstadoPreceptor('${a.dni}', 'AUSENTE')">AUSENTE</button>
-                        <button class="btn-mini naranja" onclick="cambiarEstadoPreceptor('${a.dni}', 'LLEGADA TARDE')">TARDE</button>
-                        <button class="btn-mini azul" onclick="cambiarEstadoPreceptor('${a.dni}', 'RETIRO PADRE/TUTOR')">RETIRO</button>
-                    </div>
-                `;
-                if (esTarde) {
-                    html += `
-                        <div class="acciones-preceptor" style="margin-top: 10px;">
-                            <button class="btn-mini azul" onclick="cambiarEstadoPreceptor('${a.dni}', 'PRESENTE')" style="width:100%">REINCORPORAR (PRESENTE)</button>
-                        </div>
-                    `;
-                }
-            } else if (esPreceptor && (esAusente || esRetiro)) {
-                html += `
-                    <div class="acciones-preceptor">
-                        <button class="btn-mini azul" onclick="cambiarEstadoPreceptor('${a.dni}', 'PRESENTE')" style="width:100%">REINCORPORAR (PRESENTE)</button>
-                    </div>
-                `;
-            }
+            // Not showing preceptor buttons inline; use card click to change estado if usuario es preceptor
 
             html += `</div>`;
             return { html, estadoClase };
@@ -865,34 +1261,103 @@
         }
 
         async function enviarTransaccionPost(payload) {
-            const response = await fetch(URL, {
-                method: "POST",
-                mode: "cors",
-                redirect: "follow",
-                headers: {
-                    "Content-Type": "text/plain;charset=utf-8"
-                },
-                body: JSON.stringify(payload)
-            });
+            try {
+                // Adjuntar secret si está configurado y no viene en el payload
+                try { if (typeof CLIENT_SECRET === 'string' && CLIENT_SECRET && !payload.secret) payload.secret = CLIENT_SECRET; } catch(e){}
+                // Asegurar que siempre figure un identificador de quien realiza la acción
+                try { if (!payload.docente) payload.docente = (usuarioActivo ? (usuarioActivo.nombre || usuarioActivo.usuario) : 'ANONIMO'); } catch(e){}
+                const response = await fetch(URL, {
+                    method: "POST",
+                    mode: "cors",
+                    redirect: "follow",
+                    headers: {
+                        // Usar text/plain por compatibilidad con Google Apps Script endpoints
+                        "Content-Type": "text/plain;charset=utf-8"
+                    },
+                    body: JSON.stringify(payload)
+                });
 
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                // Intentar parsear JSON, si falla devolver texto crudo para diagnósticos
+                try {
+                    return await response.json();
+                } catch (e) {
+                    const txt = await response.text();
+                    try {
+                        const parsed = JSON.parse(txt);
+                        return parsed;
+                    } catch (e2) {
+                        console.warn('Respuesta no-JSON recibida del servidor:', txt);
+                        return { ok: true, raw: txt };
+                    }
+                }
+            } catch (e) {
+                console.warn('Network error, encolando petición:', e && e.message);
+                try { payload.queued = true; } catch(err){}
+                enqueueRequest(payload);
+                return { ok: true, queued: true };
             }
+        }
 
-            return await response.json();
+        function enqueueRequest(payload) {
+            pendingRequests.push({ payload, ts: Date.now() });
+            showToast('Petición encolada por fallo de red. Se reintentará.', 'error');
+            if (!queueTimer) startQueueProcessor();
+        }
+
+        function startQueueProcessor() {
+            if (queueTimer) return;
+            queueTimer = setInterval(async () => {
+                if (queueProcessing || pendingRequests.length === 0) return;
+                queueProcessing = true;
+                const item = pendingRequests[0];
+                try {
+                    const resp = await fetch(URL, {
+                        method: "POST",
+                        mode: "cors",
+                        redirect: "follow",
+                        headers: { "Content-Type": "text/plain;charset=utf-8" },
+                        body: JSON.stringify(item.payload)
+                    });
+                    if (resp.ok) {
+                        pendingRequests.shift();
+                        showToast('Petición en la cola enviada con éxito.');
+                        // actualizar datos inmediatamente para reflejar cambios a todos los usuarios
+                        try { cargarDatos(true).catch(() => {}); } catch(e){}
+                    }
+                } catch (e) {
+                    // no-op, se reintentará en el siguiente ciclo
+                } finally {
+                    queueProcessing = false;
+                    if (pendingRequests.length === 0) {
+                        clearInterval(queueTimer);
+                        queueTimer = null;
+                        // cuando la cola queda vacía, forzar recarga para asegurar sincronía entre usuarios
+                        try { cargarDatos(true).catch(() => {}); } catch(e){}
+                    }
+                }
+            }, 10000);
         }
 
         async function registrarSalida(dni) {
             const alumno = alumnos.find(a => cleanDni(a.dni) === cleanDni(dni));
             if (!alumno) return;
 
-            const causaPorDefecto = document.getElementById("causa").value || "Baño";
-            const causa = prompt(`Indique destino para ${alumno.nombre}:`, causaPorDefecto);
-            if (causa === null) return; 
+            // Asegurarse que hay un usuario activo
+            if (!usuarioActivo) {
+                showToast('Debe iniciar sesión antes de registrar salidas.', 'error');
+                return;
+            }
+
+            // No usar prompt: tomar causa desde el selector de la interfaz
+            let motivoSalida = obtenerCausaSalida();
+            if (!motivoSalida) motivoSalida = "Baño";
 
             mostrarIndicadorActualizacion(true);
             try {
-                const motivoSalida = obtenerCausaSalida();
                 const result = await enviarTransaccionPost({
                     tipoAccion: "movimiento",
                     tipo: "salida",
@@ -922,6 +1387,9 @@
                 actualizarTarjetaAlumno(alumno);
                 actualizarContadores();
                 mostrarIndicadorActualizacion(false);
+                if (!result.queued) {
+                    cargarDatos(true).catch(() => {});
+                }
             } catch (error) {
                 console.error(error);
                 showToast("Error al registrar salida: " + error.message, "error");
@@ -966,6 +1434,9 @@
                 actualizarTarjetaAlumno(alumno);
                 actualizarContadores();
                 mostrarIndicadorActualizacion(false);
+                if (!result.queued) {
+                    cargarDatos(true).catch(() => {});
+                }
             } catch (error) {
                 console.error(error);
                 showToast("Error al registrar regreso: " + error.message, "error");
@@ -1111,6 +1582,17 @@
                     nombre: alumno.nombre,
                     docente: usuarioActivo.nombre || usuarioActivo.usuario
                 };
+
+                // Si es RETIRO, pedir nombre de quien retira (tutor/padre)
+                if (accion === "RETIRO PADRE/TUTOR") {
+                    const quienRetira = await mostrarModalTutor(alumno.nombre);
+                    if (quienRetira === null) {
+                        mostrarIndicadorActualizacion(false);
+                        return; // cancelado por usuario
+                    }
+                    payload.quienRetira = quienRetira;
+                    payload.horaRetiro = horaFormato;
+                }
                 
                 if (accion === "LLEGADA TARDE") {
                     payload.horaLlegadaTarde = horaFormato;
@@ -1118,25 +1600,51 @@
                 
                 const result = await enviarTransaccionPost(payload);
 
-                if (!result.ok) throw new Error(result.error);
+                    if (!result.ok) throw new Error(result.error);
 
                 if (accion === "AUSENTE") {
                     alumno.estado = "AUSENTE";
                 } else if (accion === "LLEGADA TARDE") {
-                    alumno.estado = "TARDE";
+                    // Marcar como presente pero registrar la hora de llegada tarde
+                    alumno.estado = ""; // contar como presente
                     alumno.horaLlegadaTarde = horaFormato;
+                    payload.horaLlegadaTarde = horaFormato;
                 } else if (accion === "RETIRO PADRE/TUTOR") {
                     alumno.estado = "RETIRO";
+                    alumno.retiroPor = payload.quienRetira || "Tutor/Apoderado";
+                    alumno.horaRetiro = payload.horaRetiro || horaFormato;
                 } else if (accion === "PRESENTE") {
                     alumno.estado = "";
-                    alumno.horaLlegadaTarde = "";
+                    // No borrar `horaLlegadaTarde` para mantener registro visible permanentemente
                 }
                 ultimoHashDatos = null;
 
                 showToast(`Estado de ${alumno.nombre} actualizado a ${accion}.`);
+                // Añadir entrada local al historial para visibilidad inmediata
+                historial.push({
+                    fechahora: new Date().toLocaleString(),
+                    alumno: alumno.nombre,
+                    accion: accion,
+                    usuario: usuarioActivo.nombre || usuarioActivo.usuario,
+                    detalle: accion === 'RETIRO PADRE/TUTOR' ? alumno.retiroPor : (accion === 'LLEGADA TARDE' ? alumno.horaLlegadaTarde : ''),
+                    tipoAccion: payload.tipoAccion || payload.tipoAccion || '',
+                    tipo: payload.tipo || '',
+                    dni: cleanDni(alumno.dni),
+                    docente: payload.docente || usuarioActivo.nombre || usuarioActivo.usuario || '',
+                    estado: alumno.estado || '',
+                    horaLlegadaTarde: payload.horaLlegadaTarde || alumno.horaLlegadaTarde || '',
+                    quienRetira: payload.quienRetira || alumno.retiroPor || '',
+                    horaRetiro: payload.horaRetiro || alumno.horaRetiro || '',
+                    queued: !!(result && result.queued)
+                });
+
                 actualizarTarjetaAlumno(alumno);
+                renderHistorial();
                 actualizarContadores();
                 mostrarIndicadorActualizacion(false);
+                if (!result.queued) {
+                    cargarDatos(true).catch(() => {});
+                }
             } catch (error) {
                 console.error(error);
                 showToast("Error al actualizar estado: " + error.message, "error");
@@ -1162,15 +1670,43 @@
                 const item = document.createElement("div");
                 item.className = "historial-item";
                 
-                const fechaFormat = h.fechahora || h.fecha || "00/00/0000 00:00";
-                const alumnoStr = h.alumno || h.nombre || "Alumno";
-                const accionStr = h.accion || "Cambio";
-                const usuarioStr = h.usuario || h.docente || "Preceptor";
+                const fechaFormat = escapeHtml(h.fechahora || h.fecha || "00/00/0000 00:00");
+                const alumnoRaw = h.alumno || h.nombre || "Alumno";
+                const alumnoStr = escapeHtml(String(alumnoRaw).toUpperCase());
+                const accionStr = escapeHtml(h.accion || "Cambio");
+                const usuarioStr = escapeHtml(h.usuario || h.docente || "Preceptor");
+                const tipoAccionStr = escapeHtml(h.tipoAccion || h.tipoaccion || '');
+                const dniStr = escapeHtml(h.dni || '');
+                const docenteHist = escapeHtml(h.docente || '');
+                const estadoHist = escapeHtml(h.estado || '');
+                const quienRetiraHist = escapeHtml(h.quienRetira || h.quienretira || '');
+                const queuedHist = (h.queued === true || h.queued === '1' || h.queued === 1) ? 'Sí' : (h.queued ? escapeHtml(String(h.queued)) : 'No');
+
+                // Mostrar horas en ISO si ya vienen así, sino formatear
+                const formatTimeForDisplay = (val) => {
+                    if (!val && val !== 0) return '';
+                    if (typeof val === 'string' && /\d{4}-\d{2}-\d{2}T/.test(val)) return val;
+                    return formatDateField(val);
+                };
+                const horaTardeDisplay = formatTimeForDisplay(h.horaLlegadaTarde || h.horallegadatarde || '');
+                const horaRetiroDisplay = formatTimeForDisplay(h.horaRetiro || h.horaretiro || '');
+
+                const linea1 = `${alumnoStr} <span style="color:var(--accent)">[${escapeHtml('CAMBIO ESTADO: ' + (accionStr || ''))}]</span>`;
+                const linea2 = `Usuario: ${usuarioStr}`;
+                const linea3 = [dniStr ? `DNI: ${dniStr}` : null, docenteHist ? `Docente: ${docenteHist}` : null].filter(Boolean).join(' · ');
+                const linea4Parts = [];
+                if (estadoHist) linea4Parts.push(`Estado: ${estadoHist}`);
+                if (quienRetiraHist) linea4Parts.push(`QuienRetira: ${quienRetiraHist}`);
+                if (horaRetiroDisplay) linea4Parts.push(`HoraRetiro: ${horaRetiroDisplay}`);
+                linea4Parts.push(`queued: ${queuedHist}`);
+                const linea4 = linea4Parts.join(' · ');
 
                 item.innerHTML = `
                     <div>
-                        <strong>${alumnoStr}</strong> <span style="color:var(--accent)">[${accionStr}]</span>
-                        <div style="font-size:11px; color:var(--muted)">Usuario: ${usuarioStr}</div>
+                        <div style="font-size:14px">${linea1}</div>
+                        <div style="font-size:12px; color:var(--muted); margin-top:6px">${linea2}</div>
+                        <div style="font-size:12px; color:var(--muted)">${linea3}</div>
+                        <div style="font-size:12px; color:var(--muted)">${linea4}</div>
                     </div>
                     <span style="font-size:12px; font-weight:700; color:var(--muted)">${fechaFormat}</span>
                 `;
@@ -1194,15 +1730,36 @@
 
         function exportHistorialPDF() {
             const printWindow = window.open("", "_blank");
-            
             let filas = "";
+
             historial.forEach(h => {
+                const fecha = escapeHtml(formatDateField(h.fechahora || h.fecha || '')) || '-';
+                const alumno = escapeHtml(h.alumno || h.nombre || '-');
+                const accion = escapeHtml(h.accion || '-');
+                const operador = escapeHtml(h.usuario || h.docente || '-');
+                const tipoAccion = escapeHtml(h.tipoAccion || h.tipoaccion || '');
+                const tipo = escapeHtml(h.tipo || '');
+                const dni = escapeHtml(h.dni || '');
+                const estado = escapeHtml(h.estado || '');
+                const horaLlegada = escapeHtml(formatDateField(h.horaLlegadaTarde || h.horallegadatarde || ''));
+                const quienRetira = escapeHtml(h.quienRetira || h.quienretira || '');
+                const horaRetiro = escapeHtml(formatDateField(h.horaRetiro || h.horaretiro || ''));
+                const queued = (h.queued === true || h.queued === '1' || h.queued === 1) ? 'Sí' : (h.queued ? escapeHtml(String(h.queued)) : 'No');
+
                 filas += `
                     <tr>
-                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${h.fechahora || h.fecha || '-'}</td>
-                        <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold;">${h.alumno || h.nombre || '-'}</td>
-                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${h.accion || '-'}</td>
-                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${h.usuario || h.docente || '-'}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${fecha}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd; font-weight: bold;">${alumno}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${accion}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${operador}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${tipoAccion}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${tipo}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${dni}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${estado}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${horaLlegada}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${quienRetira}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${horaRetiro}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">${queued}</td>
                     </tr>
                 `;
             });
@@ -1229,10 +1786,18 @@
                                 <th>Alumno</th>
                                 <th>Acción</th>
                                 <th>Operador</th>
+                                <th>tipoAccion</th>
+                                <th>tipo</th>
+                                <th>DNI</th>
+                                <th>Estado</th>
+                                <th>HoraLlegadaTarde</th>
+                                <th>QuienRetira</th>
+                                <th>HoraRetiro</th>
+                                <th>queued</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${filas || '<tr><td colspan="4" style="text-align:center; padding: 20px;">Sin registros</td></tr>'}
+                            ${filas || '<tr><td colspan="12" style="text-align:center; padding: 20px;">Sin registros</td></tr>'}
                         </tbody>
                     </table>
                     <script>

@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 
@@ -36,6 +37,55 @@
         <button id="confirm-modal-btn-no" class="btn-mini naranja">Cancelar</button>
         <button id="confirm-modal-btn-yes" class="btn-mini azul">Confirmar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL PARA INGRESAR NOMBRE DE TUTOR/PADRE (RETIRAR ALUMNO) -->
+  <div id="tutor-modal" class="custom-modal" style="display:none;">
+    <div class="custom-modal-content">
+      <h3 id="tutor-modal-title">Registrar Retiro</h3>
+      <p id="tutor-modal-message">Ingrese el nombre del padre/tutor que retira al alumno.</p>
+      <input id="tutor-name-input" type="text" placeholder="Nombre del padre/tutor" autocomplete="off" style="width:100%; padding:8px; margin-top:8px;" />
+      <div id="tutor-name-error" style="color:var(--red); font-size:12px; margin-top:6px; display:none;">El nombre es obligatorio.</div>
+      <div class="custom-modal-buttons" style="margin-top:12px;">
+        <button id="tutor-modal-btn-cancel" class="btn-mini naranja">Cancelar</button>
+        <button id="tutor-modal-btn-ok" class="btn-mini azul">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL PARA SELECCIÓN DE ESTADO (AUSENTE / TARDE / RETIRO / PRESENTE) -->
+  <div id="estado-modal" class="custom-modal" style="display:none;">
+    <div class="custom-modal-content">
+      <h3 id="estado-modal-title">Cambiar Estado</h3>
+      <p id="estado-modal-message">Selecciona el nuevo estado para el alumno.</p>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+        <button id="estado-btn-ausente" class="btn-mini rojo">AUSENTE</button>
+        <button id="estado-btn-tarde" class="btn-mini naranja">LLEGADA TARDE</button>
+        <button id="estado-btn-retiro" class="btn-mini azul">RETIRO PADRE/TUTOR</button>
+        <button id="estado-btn-presente" class="btn-mini" style="background:#2563eb; color:#fff;">PRESENTE</button>
+        <hr style="border:none; border-top:1px solid #e6e9ef; margin:8px 0;">
+        <button id="estado-btn-salida" class="btn-main" style="background:#f59e0b;">REGISTRAR SALIDA</button>
+        <button id="estado-btn-regreso" class="btn-main" style="background:#10b981;">REGISTRAR REGRESO</button>
+      </div>
+      <div class="custom-modal-buttons" style="margin-top:12px;">
+        <button id="estado-modal-btn-cancel" class="btn-mini naranja">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- POPOVER MENÚ GLOBAL (se reutiliza para cada tarjeta) -->
+  <div id="popover-menu" class="popover-menu" style="display:none;">
+    <div class="popover-content" role="menu">
+      <button class="popover-item" data-action="registrarSalida">📤 Registrar Salida</button>
+      <button class="popover-item" data-action="registrarRegreso">📥 Registrar Regreso</button>
+      <hr />
+      <button class="popover-item" data-action="preceptor" data-accion="AUSENTE">❌ Ausente</button>
+      <button class="popover-item" data-action="preceptor" data-accion="LLEGADA TARDE">⏰ Tarde</button>
+      <button class="popover-item" data-action="preceptor" data-accion="RETIRO PADRE/TUTOR">👪 Retiro</button>
+      <button class="popover-item" data-action="preceptor" data-accion="PRESENTE">✅ Presente</button>
+      <hr />
+      <button class="popover-item" data-action="limpiarHoraTarde">🧹 Limpiar hora TARDE</button>
     </div>
   </div>
 
