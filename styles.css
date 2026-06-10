@@ -1,5 +1,4 @@
-
-        :root {
+:root {
             --bg:           #0f172a;
             --panel:        #1e293b;
             --card:         #334155;
@@ -1018,4 +1017,103 @@
                 width: 90vw;
             }
         }
- 
+
+        /* ── RESUMEN AUSENTES / TARDE ── */
+        #resumen-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .resumen-grupo {
+            background: var(--panel);
+            border-radius: 14px;
+            padding: 14px 18px;
+            border: 1px solid var(--border);
+            box-shadow: 0 2px 10px var(--shadow);
+        }
+
+        .resumen-titulo {
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .resumen-titulo-ausente { color: var(--red); }
+        .resumen-titulo-tarde   { color: var(--warning); }
+        .resumen-titulo-salida  { color: var(--accent); }
+
+        .resumen-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 22px;
+            height: 22px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 800;
+            padding: 0 6px;
+        }
+
+        .resumen-titulo-ausente .resumen-badge {
+            background: rgba(239,68,68,.18);
+            color: var(--red);
+        }
+
+        .resumen-titulo-tarde .resumen-badge {
+            background: rgba(245,158,11,.18);
+            color: var(--warning);
+        }
+
+        .resumen-titulo-salida .resumen-badge {
+            background: rgba(2,132,199,.15);
+            color: var(--accent);
+        }
+
+        .resumen-lista {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 7px;
+        }
+
+        .resumen-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 11px;
+            border-radius: 50px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .resumen-chip em {
+            font-style: normal;
+            opacity: .65;
+            font-weight: 500;
+            font-size: 11px;
+        }
+
+        .resumen-chip-ausente {
+            background: rgba(239,68,68,.13);
+            color: var(--red);
+            border: 1px solid rgba(239,68,68,.25);
+        }
+
+        .resumen-chip-tarde {
+            background: rgba(245,158,11,.13);
+            color: var(--warning);
+            border: 1px solid rgba(245,158,11,.25);
+        }
+
+        .resumen-chip-salida {
+            background: rgba(2,132,199,.12);
+            color: var(--accent);
+            border: 1px solid rgba(2,132,199,.25);
+        }

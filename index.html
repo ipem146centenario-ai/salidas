@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 
@@ -210,6 +209,22 @@
     <section id="buscador-box" class="panel" style="display:none;">
       <input type="text" id="buscador" placeholder="🔍 Buscar alumno por nombre o DNI..." autocomplete="off"
         oninput="render()">
+    </section>
+
+    <!-- RESUMEN AUSENTES, TARDE Y SALIDAS -->
+    <section id="resumen-container" style="display:none;">
+      <div id="resumen-ausentes-box" class="resumen-grupo" style="display:none;">
+        <div class="resumen-titulo resumen-titulo-ausente">❌ AUSENTES <span id="resumen-ausentes-count" class="resumen-badge">0</span></div>
+        <div id="resumen-ausentes-lista" class="resumen-lista"></div>
+      </div>
+      <div id="resumen-tarde-box" class="resumen-grupo" style="display:none;">
+        <div class="resumen-titulo resumen-titulo-tarde">⏰ LLEGADA TARDE <span id="resumen-tarde-count" class="resumen-badge">0</span></div>
+        <div id="resumen-tarde-lista" class="resumen-lista"></div>
+      </div>
+      <div id="resumen-salidas-box" class="resumen-grupo" style="display:none;">
+        <div class="resumen-titulo resumen-titulo-salida">🚪 AFUERA <span id="resumen-salidas-count" class="resumen-badge">0</span></div>
+        <div id="resumen-salidas-lista" class="resumen-lista"></div>
+      </div>
     </section>
 
     <!-- GRID DE TARJETAS -->
